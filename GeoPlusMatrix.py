@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 # --- הגדרות ---
-API_KEY = "AIzaSyDMZHUXr--OlysRUicZoy6kJ1a0bwZsawY"  # הזיני את המפתח שלך כאן
+API_KEY = "my_key"  # הזיני את המפתח שלך כאן
 
 
 # --- פונקציות עזר ---
