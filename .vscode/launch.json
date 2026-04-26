@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: cluster.py",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/cluster.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Python: k-mean.py",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/k-mean.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Python: geocoding.py",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/geocoding.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
