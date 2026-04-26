@@ -24,6 +24,14 @@
       "program": "${workspaceFolder}/geocoding.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Python: distance.matrix.py",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/distance.matrix.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
     }
   ]
 }

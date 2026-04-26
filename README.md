@@ -7,6 +7,7 @@ The current VS Code run profiles are configured for:
 - `cluster.py`
 - `k-mean.py`
 - `geocoding.py`
+- `distance.matrix.py`
 
 ## Prerequisites
 
@@ -59,6 +60,7 @@ The repository already includes `.vscode/settings.json`, so VS Code should usual
 - `Python: cluster.py`
 - `Python: k-mean.py`
 - `Python: geocoding.py`
+- `Python: distance.matrix.py`
 
 3. Press `F5`.
 
@@ -81,6 +83,7 @@ Examples for the other scripts:
 ```powershell
 python .\k-mean.py
 python .\geocoding.py
+python .\distance.matrix.py
 ```
 
 ## What `cluster.py` Expects
