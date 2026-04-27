@@ -32,6 +32,15 @@
       "program": "${workspaceFolder}/distance.matrix.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
+    },
+        {
+      "name": "Python: TSP.py",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/TSP.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
     }
   ]
 }
+
