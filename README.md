@@ -8,6 +8,7 @@ The current VS Code run profiles are configured for:
 - `k-mean.py`
 - `geocoding.py`
 - `distance.matrix.py`
+- `TSP.py`
 
 ## Prerequisites
 
@@ -61,6 +62,7 @@ The repository already includes `.vscode/settings.json`, so VS Code should usual
 - `Python: k-mean.py`
 - `Python: geocoding.py`
 - `Python: distance.matrix.py`
+- `Python: TSP.py`
 
 3. Press `F5`.
 
@@ -84,6 +86,7 @@ Examples for the other scripts:
 python .\k-mean.py
 python .\geocoding.py
 python .\distance.matrix.py
+python .\TSP.py
 ```
 
 ## What `cluster.py` Expects
