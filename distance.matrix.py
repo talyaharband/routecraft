@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 
 # Paste your Google API key here.
-API_KEY = "AIzaSyAbljBrPWKH5l2NBm0hQb-t6WP6QrQBP_k"
+API_KEY = "my_api_key"
 
 
 def clean_address(addr):

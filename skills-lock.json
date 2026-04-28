@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "israeli-address-autocomplete": {
+      "source": "skills-il/government-services",
+      "sourceType": "github",
+      "computedHash": "4da39ce59c47238cec54954be87f47f5f608a8420ee1c671bf0738cf2d2301e7"
+    }
+  }
+}

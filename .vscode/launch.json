@@ -40,7 +40,16 @@
       "program": "${workspaceFolder}/TSP.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
+    },
+        {
+      "name": "Python: data.cleanup.py",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/data.cleanup.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
     }
   ]
 }
+
 
