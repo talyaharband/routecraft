@@ -2,11 +2,32 @@ import pandas as pd
 import requests
 import re
 import time
+import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from pathlib import Path
 
-# --- הגדרות ---
-API_KEY = "API KEY"
+
+def load_env_file(env_path=".env"):
+    """Load simple KEY=VALUE pairs from a local .env file."""
+    env_file = Path(env_path)
+    if not env_file.exists():
+        return
+
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def get_api_key():
+    load_env_file()
+    return os.getenv("GOOGLE_MAPS_API_KEY") or os.getenv("GEOCODING_API_KEY")
 
 
 def split_street_and_number(address_str):
@@ -45,6 +66,12 @@ def split_street_and_number(address_str):
     return street_part, num_part
 
 
+def clean_cell(value):
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
 def get_lat_lng(address, key):
     """פונה ל-Google Geocoding API"""
     url = "https://maps.googleapis.com/maps/api/geocode/json"
@@ -60,6 +87,16 @@ def get_lat_lng(address, key):
 
 
 def run_geocoding_process():
+    api_key = get_api_key()
+    if not api_key:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "Missing API key",
+            "Add GOOGLE_MAPS_API_KEY=your_key to the local .env file.",
+        )
+        return
+
     # 1. פתיחת חלון לבחירת קובץ
     root = tk.Tk()
     root.withdraw()  # הסתרת החלון הראשי של tkinter
@@ -77,27 +114,25 @@ def run_geocoding_process():
     # 2. טעינת הנתונים
     df = pd.read_excel(input_path)
 
-    # וידוי שיש לפחות 2 עמודות
-    if df.shape[1] < 2:
-        messagebox.showerror("שגיאה", "בקובץ חייבות להיות לפחות 2 עמודות (עיר ורחוב+מספר)")
+    if df.shape[1] < 3:
+        messagebox.showerror("שגיאה", "הקובץ חייב לכלול לפחות 3 עמודות: עיר, רחוב, מספר בית.")
         return
 
     city_col = df.columns[0]
-    address_col = df.columns[1]
+    street_col = df.columns[1]
+    house_number_col = df.columns[2]
 
     results = []
     print(f"מתחיל עיבוד של {len(df)} כתובות...")
 
     for index, row in df.iterrows():
-        city = str(row[city_col])
-        full_address_str = str(row[address_col])
-
-        # 3. פירוק הכתובת
-        street_name, house_number = split_street_and_number(full_address_str)
+        city = clean_cell(row[city_col])
+        street_name = clean_cell(row[street_col])
+        house_number = clean_cell(row[house_number_col])
 
         # 4. גיאוקודינג
         full_query = f"{street_name} {house_number}, {city}"
-        lat, lng = get_lat_lng(full_query, API_KEY)
+        lat, lng = get_lat_lng(full_query, api_key)
 
         results.append({
             'City': city,
