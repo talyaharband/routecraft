@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import filedialog
 from tqdm import tqdm
 import os
+from bidi.algorithm import get_display
 
 # Debug flag — turn on to see detailed prints
 DEBUG = False
@@ -36,6 +37,9 @@ df = pd.read_excel(filename, header=0, index_col=0)
 if DEBUG:
     print("Raw dataframe:")
     print(df)  # Changed from display() to print() for PyCharm
+
+# Store address labels for later use
+address_labels = df.index.tolist()
 
 distance_matrix = df.to_numpy()
 n = distance_matrix.shape[0]
@@ -157,6 +161,8 @@ for end in tqdm(range(1, n), desc="Analyzing Ends"):
 
     cases.append({
         "end": end, "initial_lb": lb, "initial_matrix": reduced_numeric,
+        "nn_cost": nn_cost, "nn_route": nn_path,
+        "opt2_cost": opt2_cost, "opt2_route": opt2_path,
         "ub": opt2_cost, "ub_route": opt2_path
     })
 
@@ -167,9 +173,20 @@ for case in cases:
     print(f"                 OPTION: END AT {end}")
     print("====================================================\n")
     print(f"Initial Lower Bound (LB): {case['initial_lb']}")
-    print("Nearest Neighbor UB:")
-    print("Route:", " -> ".join(map(str, case['ub_route'])))  # Simplified for clarity
-    print(f"Cost: {case['ub']:.2f} minutes")
+    
+    print("\nNearest Neighbor:")
+    print("Route:", " -> ".join(map(str, case['nn_route'])))
+    print(f"Cost: {case['nn_cost']:.2f} minutes")
+    
+    print("\n2-Opt Optimized:")
+    print("Route:", " -> ".join(map(str, case['opt2_route'])))
+    print(f"Cost: {case['opt2_cost']:.2f} minutes")
+    
+    improvement = case['nn_cost'] - case['opt2_cost']
+    if improvement > 0:
+        print(f"\n✅ Improvement: {improvement:.2f} minutes ({(improvement/case['nn_cost']*100):.1f}%)")
+    else:
+        print("\n➡️  No improvement from 2-Opt")
     print("\n----------------------------------------------------\n")
 
 
@@ -378,4 +395,7 @@ if results:
     print("\n================ GLOBAL BEST ROUTE ================\n")
     print(f"Best ending: {best_overall['end']}")
     print(f"Best cost: {best_overall['best_cost']:.2f} minutes")
-    print("Best route:", " → ".join(map(str, best_overall["best_route"])))
+    print("Best route:", " → ".join(map(str, best_overall["best_route"])))    
+    # Print real addresses with proper RTL support for Hebrew
+    real_addresses = " → ".join([get_display(address_labels[idx]) for idx in best_overall["best_route"]])
+    print("Real addresses:", real_addresses)
