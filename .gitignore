@@ -86,6 +86,7 @@ cmake-build-*/
 *.iws
 out/
 addresses/out/
+runs/
 
 ~$*.xlsx
 ~$*.xls

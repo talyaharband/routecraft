@@ -96,6 +96,22 @@ python .\closesToEshtaol.py
 python .\TSP.py
 ```
 
+## Running The Flow
+
+`flow.py` writes one timestamped folder per run under `runs\`, with all stage outputs inside that folder.
+
+```powershell
+python .\flow.py --start-stage 2 --input .\addresses\good_addresses.xlsx
+```
+
+To test stages 2 through 6 without spending Google API quota, use the deterministic local mock for Google geocoding and distance matrices:
+
+```powershell
+python .\flow.py --start-stage 2 --input .\addresses\good_addresses.xlsx --mock-google
+```
+
+`--mock-google` does not mock stage 1 cleanup.
+
 ## What `cluster.py` Expects
 
 The input Excel file must contain these columns:

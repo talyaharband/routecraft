@@ -1,3 +1,4 @@
+import os
 import re
 import time
 from datetime import datetime
@@ -8,8 +9,32 @@ from tkinter import filedialog, messagebox
 import pandas as pd
 import requests
 
-# Paste your Google API key here.
-API_KEY = "my_api_key"
+API_KEY = ""
+
+
+def load_env_file(env_path=".env"):
+    """Load simple KEY=VALUE pairs from a local .env file."""
+    env_file = Path(env_path)
+    if not env_file.exists():
+        return
+
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def get_api_key(input_path=None):
+    load_env_file()
+    if input_path:
+        load_env_file(Path(input_path).parent / ".env")
+    return (
+        os.getenv("DISTANCE_MATRIX_API_KEY")
+        or os.getenv("GOOGLE_MAPS_API_KEY")
+        or os.getenv("GEOCODING_API_KEY")
+    )
 
 
 def clean_address(addr):
@@ -107,6 +132,8 @@ def build_matrix_for_addresses(full_addresses, coords_dict):
 
 
 def run_distance_matrix_minutes():
+    global API_KEY
+
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
@@ -114,6 +141,14 @@ def run_distance_matrix_minutes():
     print("--- Step 1: Select input Excel file ---")
     input_path = filedialog.askopenfilename(title="Select input Excel file")
     if not input_path:
+        return
+
+    API_KEY = get_api_key(input_path)
+    if not API_KEY:
+        messagebox.showerror(
+            "Missing API key",
+            "Add GOOGLE_MAPS_API_KEY or DISTANCE_MATRIX_API_KEY to .env.",
+        )
         return
 
     df = pd.read_excel(input_path)
