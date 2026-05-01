@@ -2,8 +2,11 @@
 
 This repository contains Python scripts for processing address data in Excel files.
 
+For the full address-to-route workflow, see [PIPELINE.md](PIPELINE.md). For a clickable visual flow map, open [pipeline.html](pipeline.html).
+
 The current VS Code run profiles are configured for:
 
+- `data.cleanup.py`
 - `cluster.py`
 - `k-mean.py`
 - `geocoding.py`
@@ -58,6 +61,7 @@ The repository already includes `.vscode/settings.json`, so VS Code should usual
 1. Open the Run and Debug view.
 2. Select one of these profiles:
 
+- `Python: data.cleanup.py`
 - `Python: cluster.py`
 - `Python: k-mean.py`
 - `Python: geocoding.py`
@@ -83,9 +87,12 @@ python .\cluster.py
 Examples for the other scripts:
 
 ```powershell
-python .\k-mean.py
+python .\data.cleanup.py
 python .\geocoding.py
+python .\cluster.py
+python .\k-mean.py
 python .\distance.matrix.py
+python .\closesToEshtaol.py
 python .\TSP.py
 ```
 

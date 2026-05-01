@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Routecraft Pipeline</title>
+  <style>
+    :root {
+      --ink: #18212f;
+      --muted: #5b6472;
+      --line: #cfd7e3;
+      --panel: #ffffff;
+      --page: #f5f7fb;
+      --blue: #2764c8;
+      --green: #18845f;
+      --amber: #a76008;
+      --rose: #b7425b;
+      --focus: #111827;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background: var(--page);
+    }
+
+    .page {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 28px 18px 40px;
+    }
+
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+      max-width: 720px;
+    }
+
+    .doc-link {
+      flex: 0 0 auto;
+      color: var(--blue);
+      text-decoration: none;
+      font-weight: 700;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .flow-shell,
+    .details {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 12px 28px rgba(25, 35, 53, 0.06);
+    }
+
+    .flow-shell {
+      padding: 18px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      gap: 12px 28px;
+      align-items: stretch;
+    }
+
+    .node-wrap {
+      position: relative;
+      min-height: 118px;
+    }
+
+    .node-wrap::after {
+      content: "->";
+      position: absolute;
+      top: 48%;
+      right: -22px;
+      color: #6d7685;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .node-wrap.break::after,
+    .node-wrap.end::after,
+    .node-wrap.optional::after {
+      content: "";
+    }
+
+    .node {
+      width: 100%;
+      height: 100%;
+      min-height: 118px;
+      border: 2px solid transparent;
+      border-left-width: 7px;
+      border-radius: 8px;
+      background: #fbfcfe;
+      color: var(--ink);
+      padding: 13px 12px;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      justify-content: space-between;
+      box-shadow: inset 0 0 0 1px var(--line);
+    }
+
+    .node:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 3px;
+    }
+
+    .node[aria-pressed="true"] {
+      background: #eef5ff;
+      border-color: var(--blue);
+      box-shadow: 0 10px 24px rgba(39, 100, 200, 0.16);
+    }
+
+    .node.data {
+      border-left-color: var(--amber);
+    }
+
+    .node.script {
+      border-left-color: var(--blue);
+    }
+
+    .node.group {
+      border-left-color: var(--green);
+    }
+
+    .node.route {
+      border-left-color: var(--rose);
+    }
+
+    .node.optional {
+      border-left-color: #6f55b5;
+    }
+
+    .eyebrow {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .node-title {
+      display: block;
+      font-size: 18px;
+      font-weight: 800;
+      line-height: 1.12;
+      word-break: break-word;
+    }
+
+    .node-meta {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.25;
+    }
+
+    .optional-lane {
+      grid-column: 3 / 5;
+      display: grid;
+      grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr);
+      gap: 12px 28px;
+      margin-top: 8px;
+      padding-top: 16px;
+      border-top: 1px dashed var(--line);
+    }
+
+    .details {
+      position: sticky;
+      top: 18px;
+      padding: 20px;
+    }
+
+    .details h2 {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .script-name {
+      margin: 8px 0 18px;
+      color: var(--blue);
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .detail-section {
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      margin-top: 14px;
+    }
+
+    .detail-section h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .detail-section ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .detail-section li {
+      margin: 6px 0;
+      line-height: 1.35;
+    }
+
+    code {
+      font-family: Consolas, "SFMono-Regular", monospace;
+      background: #eef1f6;
+      padding: 1px 4px;
+      border-radius: 4px;
+      font-size: 0.94em;
+    }
+
+    .note {
+      margin: 16px 0 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    @media (max-width: 980px) {
+      header {
+        align-items: start;
+        flex-direction: column;
+      }
+
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .details {
+        position: static;
+      }
+
+      .flow {
+        grid-template-columns: repeat(2, minmax(150px, 1fr));
+      }
+
+      .node-wrap:nth-child(2n)::after,
+      .node-wrap.break::after,
+      .node-wrap.end::after {
+        content: "";
+      }
+
+      .optional-lane {
+        grid-column: 1 / 3;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .page {
+        padding: 20px 12px 28px;
+      }
+
+      .flow,
+      .optional-lane {
+        grid-template-columns: 1fr;
+      }
+
+      .node-wrap::after {
+        content: "";
+      }
+
+      .optional-lane {
+        grid-column: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <h1>Routecraft Pipeline</h1>
+        <p class="subtitle">A code-first map of the Excel handoffs from raw addresses to route output.</p>
+      </div>
+      <a class="doc-link" href="PIPELINE.md">PIPELINE.md</a>
+    </header>
+
+    <section class="layout" aria-label="Pipeline map">
+      <div class="flow-shell">
+        <div class="flow" id="flow"></div>
+      </div>
+
+      <aside class="details" aria-live="polite">
+        <h2 id="detail-title"></h2>
+        <div class="script-name" id="detail-script"></div>
+
+        <div class="detail-section">
+          <h3>Input</h3>
+          <ul id="detail-input"></ul>
+        </div>
+
+        <div class="detail-section">
+          <h3>Output</h3>
+          <ul id="detail-output"></ul>
+        </div>
+
+        <div class="detail-section">
+          <h3>What The Code Does</h3>
+          <ul id="detail-notes"></ul>
+        </div>
+
+        <p class="note" id="detail-note"></p>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const stages = [
+      {
+        id: "raw",
+        type: "data",
+        eyebrow: "Source",
+        title: "Raw Order Excel",
+        meta: "Order rows with messy address fields",
+        script: "input file",
+        input: ["An Excel file selected by the user."],
+        output: ["Rows passed into the cleanup step."],
+        notes: [
+          "The cleanup script looks for ship_to_street1, ship_to_street2, and site_name.",
+          "Missing cleanup columns are created as empty columns by data.cleanup.py."
+        ],
+        note: "This is the operational source file before Routecraft changes it."
+      },
+      {
+        id: "cleanup",
+        type: "script",
+        eyebrow: "Step 1",
+        title: "Clean Addresses",
+        meta: "data.cleanup.py",
+        script: "data.cleanup.py",
+        input: [
+          "Raw order Excel from a file chooser.",
+          "OpenAI key from a popup.",
+          "Google Maps key from a popup."
+        ],
+        output: [
+          "A user-selected Excel file that preserves the input columns.",
+          "Adds ship_to_street_final, is_real_address, and coordinates."
+        ],
+        notes: [
+          "Uses OpenAI to normalize Israeli address text into structured JSON.",
+          "Uses Google Geocoding to validate precise street addresses.",
+          "Processes rows in parallel with a ThreadPoolExecutor."
+        ],
+        note: "This output is useful for audit and cleanup, but it is not the exact shape expected by geocoding.py."
+      },
+      {
+        id: "prep",
+        type: "data",
+        eyebrow: "Handoff",
+        title: "Prepared Address Excel",
+        meta: "City, Street_Name, House_Number",
+        script: "manual/external preparation",
+        input: [
+          "Cleaned address data from the cleanup output or another source."
+        ],
+        output: [
+          "An Excel file whose first three columns are City, Street_Name, and House_Number."
+        ],
+        notes: [
+          "geocoding.py reads columns by position, not by name.",
+          "addresses/good_addresses.xlsx is a checked-in example of this expected format."
+        ],
+        note: "This is the current manual bridge between cleanup and geocoding."
+      },
+      {
+        id: "geocoding",
+        type: "script",
+        eyebrow: "Step 2",
+        title: "Geocode",
+        meta: "geocoding.py",
+        script: "geocoding.py",
+        input: [
+          "Excel selected with a file chooser.",
+          "First column: city.",
+          "Second column: street.",
+          "Third column: house number.",
+          "GOOGLE_MAPS_API_KEY or GEOCODING_API_KEY from .env."
+        ],
+        output: [
+          "A user-selected Excel file with City, Street_Name, House_Number, LAT, and LNG."
+        ],
+        notes: [
+          "Calls Google Geocoding once per row.",
+          "Creates a fresh output dataframe rather than preserving every original column.",
+          "Sleeps briefly between rows to avoid hitting the API too aggressively."
+        ],
+        note: "This file is the normal input for cluster.py."
+      },
+      {
+        id: "cluster",
+        type: "group",
+        eyebrow: "Step 3",
+        title: "Street Cluster",
+        meta: "cluster.py",
+        script: "cluster.py",
+        input: [
+          "Geocoded Excel with Street_Name, House_Number, LAT, and LNG."
+        ],
+        output: [
+          "A user-selected Excel file with one representative row per cluster.",
+          "Adds cluster_id, total_orders_in_cluster, and detailed_addresses."
+        ],
+        notes: [
+          "Sorts by Street_Name and House_Number.",
+          "Drops rows without a numeric House_Number.",
+          "Groups nearby addresses on the same street using a 150-meter haversine threshold."
+        ],
+        note: "The row count can shrink here because multiple nearby orders become one representative stop."
+      },
+      {
+        id: "kmean",
+        type: "group",
+        eyebrow: "Step 4",
+        title: "Group Stops",
+        meta: "k-mean.py",
+        script: "k-mean.py",
+        input: [
+          "Clustered Excel.",
+          "Current code reads LAT and LNG from columns D and E."
+        ],
+        output: [
+          "A user-selected Excel file with a new cluster_group column."
+        ],
+        notes: [
+          "If there are 30 or fewer rows, every row gets cluster_group 0.",
+          "For larger files, KMeansConstrained creates groups with at most 30 rows.",
+          "Displays a matplotlib scatter plot before saving."
+        ],
+        note: "The cluster_group column is expected to be column I for distance.matrix.py in the current pipeline."
+      },
+      {
+        id: "matrix",
+        type: "script",
+        eyebrow: "Step 5",
+        title: "Build Matrices",
+        meta: "distance.matrix.py",
+        script: "distance.matrix.py",
+        input: [
+          "Grouped Excel from k-mean.py.",
+          "Column I must contain the group number.",
+          "Hard-coded API_KEY value inside distance.matrix.py."
+        ],
+        output: [
+          "One Excel file per group in the input folder.",
+          "Files are named matrix_<group>_<timestamp>.xlsx."
+        ],
+        notes: [
+          "Builds address labels from column B and column A, currently Street_Name and City.",
+          "Geocodes unique labels, then calls Google Distance Matrix for driving minutes.",
+          "Writes 999 when coordinates or route elements are missing."
+        ],
+        note: "These matrix files are the direct input to TSP.py."
+      },
+      {
+        id: "tsp",
+        type: "route",
+        eyebrow: "Step 6",
+        title: "Solve Route",
+        meta: "TSP.py",
+        script: "TSP.py",
+        input: [
+          "One matrix Excel file selected with a file chooser."
+        ],
+        output: [
+          "Console output with route options, best route, total minutes, and real address labels."
+        ],
+        notes: [
+          "Loads the matrix with the first column as row labels.",
+          "Treats node 0 as the start point.",
+          "Tests possible ending points using nearest neighbor, 2-opt, and branch-and-bound."
+        ],
+        note: "Run this once for each matrix file produced by distance.matrix.py."
+      },
+      {
+        id: "eshtaol",
+        type: "optional",
+        eyebrow: "Optional",
+        title: "Closest To Eshtaol",
+        meta: "closesToEshtaol.py",
+        script: "closesToEshtaol.py",
+        input: [
+          "Excel with LAT, LNG, Street_Name, House_Number, and cluster_group."
+        ],
+        output: [
+          "Console output with the closest address and its cluster_group."
+        ],
+        notes: [
+          "Uses hard-coded warehouse coordinates 31.77927525, 35.0105885.",
+          "Calculates air distance with the haversine formula.",
+          "Does not write an output file."
+        ],
+        note: "Use after k-mean.py when you want to identify the group nearest to the warehouse."
+      },
+      {
+        id: "grouped-handoff",
+        type: "data",
+        eyebrow: "Branch",
+        title: "Grouped Excel",
+        meta: "output of k-mean.py",
+        script: "k-mean.py output",
+        input: [
+          "The grouped Excel file saved by k-mean.py."
+        ],
+        output: [
+          "Input for distance.matrix.py.",
+          "Optional input for closesToEshtaol.py."
+        ],
+        notes: [
+          "Contains the cluster_group column.",
+          "Keeps the geocoded and clustered stop data needed by later scripts."
+        ],
+        note: "The main route continues to distance.matrix.py; the Eshtaol helper can also inspect this file."
+      }
+    ];
+
+    const flow = document.getElementById("flow");
+    const detailTitle = document.getElementById("detail-title");
+    const detailScript = document.getElementById("detail-script");
+    const detailInput = document.getElementById("detail-input");
+    const detailOutput = document.getElementById("detail-output");
+    const detailNotes = document.getElementById("detail-notes");
+    const detailNote = document.getElementById("detail-note");
+
+    function makeList(target, items) {
+      target.replaceChildren();
+      items.forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        target.appendChild(li);
+      });
+    }
+
+    function selectStage(stageId) {
+      const stage = stages.find((item) => item.id === stageId);
+      if (!stage) {
+        return;
+      }
+
+      document.querySelectorAll(".node").forEach((node) => {
+        node.setAttribute("aria-pressed", String(node.dataset.stage === stageId));
+      });
+
+      detailTitle.textContent = stage.title;
+      detailScript.textContent = stage.script;
+      makeList(detailInput, stage.input);
+      makeList(detailOutput, stage.output);
+      makeList(detailNotes, stage.notes);
+      detailNote.textContent = stage.note;
+    }
+
+    function buildNode(stage, extraClass) {
+      const wrap = document.createElement("div");
+      wrap.className = `node-wrap ${extraClass || ""}`.trim();
+
+      const button = document.createElement("button");
+      button.className = `node ${stage.type}`;
+      button.type = "button";
+      button.dataset.stage = stage.id;
+      button.setAttribute("aria-pressed", "false");
+      button.addEventListener("click", () => selectStage(stage.id));
+
+      const top = document.createElement("span");
+      top.className = "eyebrow";
+      top.textContent = stage.eyebrow;
+
+      const title = document.createElement("span");
+      title.className = "node-title";
+      title.textContent = stage.title;
+
+      const meta = document.createElement("span");
+      meta.className = "node-meta";
+      meta.textContent = stage.meta;
+
+      button.append(top, title, meta);
+      wrap.appendChild(button);
+      return wrap;
+    }
+
+    stages.slice(0, 8).forEach((stage, index) => {
+      const extraClass = index === 3 ? "break" : index === 7 ? "end" : "";
+      flow.appendChild(buildNode(stage, extraClass));
+    });
+
+    const optionalLane = document.createElement("div");
+    optionalLane.className = "optional-lane";
+    optionalLane.appendChild(buildNode(stages[9], "optional"));
+    optionalLane.appendChild(buildNode(stages[8], "end optional"));
+    flow.appendChild(optionalLane);
+
+    selectStage("cleanup");
+  </script>
+</body>
+</html>
