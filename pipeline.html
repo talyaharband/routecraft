@@ -357,8 +357,8 @@
         input: ["An Excel file selected by the user."],
         output: ["Rows passed into the cleanup step."],
         notes: [
-          "The cleanup script looks for ship_to_street1, ship_to_street2, and site_name.",
-          "Missing cleanup columns are created as empty columns by data.cleanup.py."
+          "Required columns: order id, client id, site id, site name, ship to street 1, ship to street 2, required delivery date, comments.",
+          "required delivery date is deleted during cleanup."
         ],
         note: "This is the operational source file before Routecraft changes it."
       },
@@ -370,20 +370,20 @@
         meta: "data.cleanup.py",
         script: "data.cleanup.py",
         input: [
-          "Raw order Excel from a file chooser.",
-          "OpenAI key from a popup.",
-          "Google Maps key from a popup."
+          "Raw order Excel with order, client, site, city, address, and comments columns.",
+          "No OpenAI key is used."
         ],
         output: [
-          "A user-selected Excel file that preserves the input columns.",
-          "Adds ship_to_street_final, is_real_address, and coordinates."
+          "01a_failed_addresses.xlsx for rows that could not be parsed.",
+          "01b_addresses_for_geocoding.xlsx with City, Street_Name, House_Number.",
+          "01c_good_orders_original_format.xlsx preserving order/client/site/comments."
         ],
         notes: [
-          "Uses OpenAI to normalize Israeli address text into structured JSON.",
-          "Uses Google Geocoding to validate precise street addresses.",
-          "Processes rows in parallel with a ThreadPoolExecutor."
+          "Uses Israeli address parser rules to merge ship to street 1 and 2.",
+          "Sorts and groups orders by city name.",
+          "Keeps original comments so the final route report can show driver notes."
         ],
-        note: "This output is useful for audit and cleanup, but it is not the exact shape expected by geocoding.py."
+        note: "The 01b file continues through the flow; the 01c file is used later for route details."
       },
       {
         id: "prep",
@@ -391,18 +391,18 @@
         eyebrow: "Handoff",
         title: "Prepared Address Excel",
         meta: "City, Street_Name, House_Number",
-        script: "manual/external preparation",
+        script: "data.cleanup.py output",
         input: [
-          "Cleaned address data from the cleanup output or another source."
+          "Created automatically by stage 1, or provided manually when starting at stage 2."
         ],
         output: [
           "An Excel file whose first three columns are City, Street_Name, and House_Number."
         ],
         notes: [
-          "geocoding.py reads columns by position, not by name.",
+          "flow.py reads the three-column shape for stage 2.",
           "addresses/good_addresses.xlsx is a checked-in example of this expected format."
         ],
-        note: "This is the current manual bridge between cleanup and geocoding."
+        note: "This is the automated bridge between cleanup and geocoding."
       },
       {
         id: "geocoding",
@@ -419,14 +419,14 @@
           "GOOGLE_MAPS_API_KEY or GEOCODING_API_KEY from .env."
         ],
         output: [
-          "A user-selected Excel file with City, Street_Name, House_Number, LAT, and LNG."
+          "02_geocoded_addresses.xlsx with City, Street_Name, House_Number, LAT, and LNG."
         ],
         notes: [
           "Calls Google Geocoding once per row.",
           "Creates a fresh output dataframe rather than preserving every original column.",
           "Sleeps briefly between rows to avoid hitting the API too aggressively."
         ],
-        note: "This file is the normal input for cluster.py."
+        note: "This file is the normal input for city-aware clustering."
       },
       {
         id: "cluster",
@@ -436,16 +436,16 @@
         meta: "cluster.py",
         script: "cluster.py",
         input: [
-          "Geocoded Excel with Street_Name, House_Number, LAT, and LNG."
+          "Geocoded Excel with City, Street_Name, House_Number, LAT, and LNG."
         ],
         output: [
-          "A user-selected Excel file with one representative row per cluster.",
+          "03_nearby_address_clusters.xlsx with one representative row per cluster.",
           "Adds cluster_id, total_orders_in_cluster, and detailed_addresses."
         ],
         notes: [
-          "Sorts by Street_Name and House_Number.",
+          "Sorts by City, Street_Name, and House_Number.",
           "Drops rows without a numeric House_Number.",
-          "Groups nearby addresses on the same street using a 150-meter haversine threshold."
+          "Groups nearby addresses on the same street inside each city using a 150-meter haversine threshold."
         ],
         note: "The row count can shrink here because multiple nearby orders become one representative stop."
       },
@@ -457,18 +457,17 @@
         meta: "k-mean.py",
         script: "k-mean.py",
         input: [
-          "Clustered Excel.",
-          "Current code reads LAT and LNG from columns D and E."
+          "Clustered Excel with City, LAT, and LNG."
         ],
         output: [
-          "A user-selected Excel file with a new cluster_group column."
+          "04_clustered_delivery_groups.xlsx with a new cluster_group column."
         ],
         notes: [
-          "If there are 30 or fewer rows, every row gets cluster_group 0.",
-          "For larger files, KMeansConstrained creates groups with at most 30 rows.",
-          "Displays a matplotlib scatter plot before saving."
+          "Runs grouping separately per city.",
+          "Global group numbers continue across cities instead of restarting.",
+          "Each group is capped by max group size."
         ],
-        note: "The cluster_group column is expected to be column I for distance.matrix.py in the current pipeline."
+        note: "The flow looks for the named cluster_group column."
       },
       {
         id: "matrix",
@@ -478,40 +477,44 @@
         meta: "distance.matrix.py",
         script: "distance.matrix.py",
         input: [
-          "Grouped Excel from k-mean.py.",
-          "Column I must contain the group number.",
-          "Hard-coded API_KEY value inside distance.matrix.py."
+          "Grouped Excel from stage 4.",
+          "Named cluster_group column.",
+          "Google key from .env or --distance-api-key."
         ],
         output: [
-          "One Excel file per group in the input folder.",
-          "Files are named matrix_<group>_<timestamp>.xlsx."
+          "One Excel matrix per group in the run folder.",
+          "Files are named 05_distance_matrix_group-<group>.xlsx."
         ],
         notes: [
-          "Builds address labels from column B and column A, currently Street_Name and City.",
+          "Builds address labels from Street_Name House_Number, City.",
           "Geocodes unique labels, then calls Google Distance Matrix for driving minutes.",
           "Writes 999 when coordinates or route elements are missing."
         ],
-        note: "These matrix files are the direct input to TSP.py."
+        note: "These matrix files feed the final delivery planner."
       },
       {
-        id: "tsp",
+        id: "deliveries",
         type: "route",
         eyebrow: "Step 6",
-        title: "Solve Route",
-        meta: "TSP.py",
-        script: "TSP.py",
+        title: "Delivery Plan",
+        meta: "deliveries.py",
+        script: "deliveries.py",
         input: [
-          "One matrix Excel file selected with a file chooser."
+          "04_clustered_delivery_groups.xlsx.",
+          "All 05_distance_matrix_group-*.xlsx files.",
+          "01c_good_orders_original_format.xlsx when stage 1 was included."
         ],
         output: [
-          "Console output with route options, best route, total minutes, and real address labels."
+          "06_delivery_plan.xlsx.",
+          "06_delivery_plan.html.",
+          "06_delivery_plan.log."
         ],
         notes: [
-          "Loads the matrix with the first column as row labels.",
-          "Treats node 0 as the start point.",
-          "Tests possible ending points using nearest neighbor, 2-opt, and branch-and-bound."
+          "Plans multi-driver routes across groups.",
+          "The HTML report shows step timing and route addresses.",
+          "When original order metadata exists, comments and IDs appear next to each route address."
         ],
-        note: "Run this once for each matrix file produced by distance.matrix.py."
+        note: "This is the final output of the automated flow."
       },
       {
         id: "eshtaol",

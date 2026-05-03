@@ -1,208 +1,236 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
 import pandas as pd
-from openai import OpenAI
-import requests
-import json
-import tkinter as tk
-from tkinter import filedialog, messagebox
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-# --- חלונית מפתחות ---
-class KeyRequester(tk.Toplevel):
-    def __init__(self, title, prompt):
-        super().__init__()
-        self.title(title)
-        self.geometry("450x200")
-        self.attributes("-topmost", True)
-        self.result = None
-        self.update_idletasks()
-        x = (self.winfo_screenwidth() // 2) - 225
-        y = (self.winfo_screenheight() // 2) - 100
-        self.geometry(f'+{x}+{y}')
-        tk.Label(self, text=prompt, pady=15, font=("Arial", 10, "bold")).pack()
-        self.entry = tk.Entry(self, width=50)
-        self.entry.pack(pady=10, padx=20)
-        btn_frame = tk.Frame(self)
-        btn_frame.pack(pady=15)
-        tk.Button(btn_frame, text="📋 הדבק", command=lambda: self.entry.insert(0, self.clipboard_get())).pack(
-            side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="אישור", command=self.on_submit, width=10, bg="#4CAF50", fg="white").pack(
-            side=tk.LEFT, padx=10)
-        self.wait_window()
+RAW_COLUMN_ALIASES = {
+    "order_id": ["order id", "order_id", "orderid"],
+    "client_id": ["client id", "client_id", "clientid"],
+    "site_id": ["site id", "site_id", "siteid"],
+    "site_name": ["site name", "site_name", "sitename"],
+    "ship_to_street1": ["ship to street 1", "ship_to_street1", "ship to street1"],
+    "ship_to_street2": ["ship to street 2", "ship_to_street2", "ship to street2"],
+    "required_delivery_date": [
+        "required delivery date",
+        "required_delivery_date",
+        "delivery date",
+    ],
+    "comments": ["comments", "comment", "notes"],
+}
 
-    def on_submit(self):
-        self.result = self.entry.get().strip()
-        self.destroy()
+KNOWN_CITY_CODES = {
+    "ירושלים": 3000,
+    "תל אביב": 5000,
+    "תל אביב יפו": 5000,
+    "חיפה": 4000,
+    "ראשון לציון": 8300,
+    "פתח תקווה": 7900,
+    "אשדוד": 70,
+    "נתניה": 7400,
+    "באר שבע": 9000,
+    "חולון": 6600,
+    "בני ברק": 6100,
+    "בית שמש": 2610,
+    "מודיעין": 1200,
+    "מודיעין עילית": 3797,
+    "לוד": 7000,
+    "עפולה": 7700,
+    "רכסים": 922,
+}
+
+STREET_NORMALIZATIONS = [
+    (r"[\"״׳']", ""),
+    (r"\bר\s+", "רבי "),
+    (r"\bרבי עקיבה\b", "רבי עקיבא"),
+    (r"\bרשבי\b", "רבי שמעון בר יוחאי"),
+    (r"\bרשבא\b", "רשב״א"),
+    (r"\bהריטבא\b", "הריטב״א"),
+    (r"\bשד\s+", "שדרות "),
+]
 
 
-# --- פונקציית העיבוד המרכזית ---
-def process_address_clean(index, s1, s2, city, client, g_key):
-    combined = f"{s1} {s2}".strip()
+def clean_cell(value: Any) -> str:
+    if pd.isna(value):
+        return ""
+    return re.sub(r"\s+", " ", str(value).strip())
 
-    # שלב 1: פרומפט מדויק לאחידות ותיקונים מתקדמים
-    system_prompt = (
-        "You are an expert at parsing and cleaning Israeli addresses. "
-        "Extract the address components into a strict JSON format. "
-        "The JSON MUST have exactly these keys: 'street', 'number', 'apt', 'floor', 'extra', 'english_problem'.\n"
-        "Rules:\n"
-        "1. Fix typos and strictly UNIFY street names. Remove quotes or apostrophes from acronyms (e.g., 'חזון אי\"ש' -> 'חזון איש', 'הריטב\"א' -> 'הריטבא').\n"
-        "2. Remove words like 'רחוב', 'שדרות', 'שד' from the street name entirely.\n"
-        "3. Combine building number and letter (e.g. '15', 'א' -> '15א').\n"
-        "4. Floor numbers with minus: standardize to '-1' (both '1-' and '-1' become '-1').\n"
-        "5. If 'קומה' or 'דירה' appear WITHOUT any number nearby, completely ignore them and do not include them in the JSON.\n"
-        "6. DO NOT include the city name anywhere in the output.\n"
-        "7. Remove any dates or time markers from the text.\n"
-        "8. If there are English words, translate them to Hebrew and match the closest known street name in the specific city. If you cannot translate/match it, set 'english_problem' to true. Otherwise, false.\n"
-        "9. If a component is missing, return an empty string (\"\").\n\n"
-        "Examples:\n"
-        "Raw: 'רחוב הרצל 15 א קומה 2 כניסה ב', City: 'חיפה' -> {\"street\": \"הרצל\", \"number\": \"15א\", \"apt\": \"\", \"floor\": \"2\", \"extra\": \"כניסה ב\", \"english_problem\": false}\n"
-        "Raw: 'הריטב\"א 12 דירה', City: 'אלעד' -> {\"street\": \"הריטבא\", \"number\": \"12\", \"apt\": \"\", \"floor\": \"\", \"extra\": \"\", \"english_problem\": false}\n"
-        "Raw: 'חזון אי\"ש 10 קומה 1-', City: 'בני ברק' -> {\"street\": \"חזון איש\", \"number\": \"10\", \"apt\": \"\", \"floor\": \"-1\", \"extra\": \"\", \"english_problem\": false}\n"
-        "Raw: 'הרקפת 4 בתאריך 12.05', City: 'תל אביב' -> {\"street\": \"הרקפת\", \"number\": \"4\", \"apt\": \"\", \"floor\": \"\", \"extra\": \"\", \"english_problem\": false}\n"
-    )
-    user_prompt = f"Raw Address: '{combined}', City: '{city}'"
 
-    try:
-        ai_res = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.0
+def normalize_column_name(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value).strip().lower().replace("_", " "))
+
+
+def resolve_columns(df: pd.DataFrame) -> dict[str, str]:
+    normalized = {normalize_column_name(col): col for col in df.columns}
+    resolved = {}
+    for canonical, aliases in RAW_COLUMN_ALIASES.items():
+        for alias in aliases:
+            col = normalized.get(normalize_column_name(alias))
+            if col is not None:
+                resolved[canonical] = col
+                break
+    return resolved
+
+
+def strip_city_from_address(address: str, city: str) -> str:
+    if not city:
+        return address
+    return re.sub(re.escape(city), " ", address, flags=re.IGNORECASE).strip()
+
+
+def normalize_address_text(street1: Any, street2: Any, city: Any) -> str:
+    text = " ".join(part for part in [clean_cell(street1), clean_cell(street2)] if part)
+    text = strip_city_from_address(text, clean_cell(city))
+    text = text.replace("\\", " ").replace("|", " ")
+    text = re.sub(r"[,:;]+", " ", text)
+    text = re.sub(r"\b(טל|טלפון|נייד|פלאפון)\b.*$", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def parse_street_and_number(address: str) -> tuple[str, str, str]:
+    if not address:
+        return "", "", "empty address"
+
+    address = re.sub(r"\s*/\s*", "/", address)
+    match = re.search(r"\d+[\wא-ת/-]*", address)
+    if not match:
+        return address.strip(), "", "missing house number"
+
+    number = match.group(0).strip()
+    before = address[: match.start()].strip(" ,-/")
+    after = address[match.end() :].strip(" ,-/")
+
+    if before:
+        street = before
+    else:
+        street = after
+
+    street = normalize_street_name(street)
+    street = re.sub(r"\s+", " ", street)
+    if not street:
+        return "", number, "missing street"
+    return street, number, ""
+
+
+def normalize_street_name(street: str) -> str:
+    street = re.sub(r"^(רחוב|רח׳|רח'|רח)\s+", "", clean_cell(street)).strip()
+    for pattern, replacement in STREET_NORMALIZATIONS:
+        street = re.sub(pattern, replacement, street)
+    return re.sub(r"\s+", " ", street).strip()
+
+
+def validate_components(city: str, street: str, house_number: str) -> tuple[bool, str]:
+    if not city:
+        return False, "missing city"
+    if not street:
+        return False, "missing street"
+    if not house_number:
+        return False, "missing house number"
+    if not re.match(r"^\d+", house_number):
+        return False, "invalid house number"
+    return True, "verified by Israeli address parser"
+
+
+def clean_raw_orders(input_path: Path, run_dir: Path) -> dict[str, Path]:
+    df = pd.read_excel(input_path).fillna("")
+    columns = resolve_columns(df)
+    missing = [
+        name
+        for name in ["order_id", "client_id", "site_id", "site_name", "ship_to_street1", "ship_to_street2", "comments"]
+        if name not in columns
+    ]
+    if missing:
+        raise RuntimeError(f"Stage 1 input is missing columns: {', '.join(missing)}")
+
+    if "required_delivery_date" in columns:
+        df = df.drop(columns=[columns["required_delivery_date"]])
+
+    df = df.sort_values(by=[columns["site_name"]], kind="stable").reset_index(drop=True)
+
+    good_address_rows = []
+    good_original_rows = []
+    failed_rows = []
+
+    for source_index, row in df.iterrows():
+        city = clean_cell(row[columns["site_name"]])
+        merged = normalize_address_text(
+            row[columns["ship_to_street1"]],
+            row[columns["ship_to_street2"]],
+            city,
         )
-        data = json.loads(ai_res.choices[0].message.content)
+        street, house_number, parse_error = parse_street_and_number(merged)
+        valid, status = validate_components(city, street, house_number)
+        city_code = KNOWN_CITY_CODES.get(city, "")
 
-        street = data.get('street', '').strip()
-        num = str(data.get('number', '')).strip()
+        result = row.to_dict()
+        result.update(
+            {
+                "source_row": source_index + 2,
+                "City": city,
+                "Street_Name": street,
+                "House_Number": house_number,
+                "merged_address": merged,
+                "city_code": city_code,
+                "cleanup_status": status if valid else parse_error or status,
+            }
+        )
 
-        # שלב 2: אימות גיאוגרפי ושליפת קואורדינטות (על בסיס עיר, רחוב ומספר בלבד)
-        google_status = "לא נבדק"
-        coordinates = ""
-        final_street = street
+        if valid:
+            good_address_rows.append(
+                {
+                    "City": city,
+                    "Street_Name": street,
+                    "House_Number": house_number,
+                }
+            )
+            good_original_rows.append(result)
+        else:
+            failed_rows.append(result)
 
-        if data.get('english_problem'):
-            google_status = "❌ שגיאה: נמצאו מילים באנגלית ללא תרגום תואם לרחוב בעיר"
-        elif street:
-            # מגבילים את החיפוש לישראל כדי לדייק את גוגל
-            url = f"https://maps.googleapis.com/maps/api/geocode/json?address={street} {num}, {city}&components=country:IL&key={g_key}&language=he"
-            res = requests.get(url).json()
+    result_columns = list(df.columns) + [
+        "source_row",
+        "City",
+        "Street_Name",
+        "House_Number",
+        "merged_address",
+        "city_code",
+        "cleanup_status",
+    ]
+    good_addresses = pd.DataFrame(good_address_rows, columns=["City", "Street_Name", "House_Number"])
+    good_original = pd.DataFrame(good_original_rows, columns=result_columns)
+    failed = pd.DataFrame(failed_rows, columns=result_columns)
 
-            if res.get('status') == 'OK':
-                result = res['results'][0]
-                types = result.get('types', [])
-                
-                # בודק אם זו כתובת אמיתית של בניין
-                if 'street_address' in types or 'premise' in types or 'subpremise' in types:
-                    google_status = "✅ כתובת אומתה במלואה (קיימת במפה)"
-                    lat = result['geometry']['location']['lat']
-                    lng = result['geometry']['location']['lng']
-                    coordinates = f"{lat}, {lng}"
-                else:
-                    # מפרט את הבעיה במידה והיא לא מדוייקת
-                    has_route = any('route' in c.get('types', []) for c in result.get('address_components', []))
-                    if has_route:
-                        google_status = "⚠️ בעיה: הרחוב נמצא, אך מספר הבית לא קיים במדויק במפה"
-                    else:
-                        google_status = "❓ בעיה: לא זוהה רחוב, גוגל מצא רק את האזור/עיר"
-            else:
-                reason = res.get('status', 'Unknown')
-                if reason == 'ZERO_RESULTS':
-                    google_status = "❌ שגיאה: הכתובת כלל לא נמצאה בישראל (Zero Results)"
-                else:
-                    google_status = f"❌ שגיאת מפות גוגל: {reason}"
+    failed_path = run_dir / "01a_failed_addresses.xlsx"
+    good_path = run_dir / "01b_addresses_for_geocoding.xlsx"
+    original_path = run_dir / "01c_good_orders_original_format.xlsx"
 
-        # שלב 3: הרכבת המחרוזת הסופית על בסיס הניקוי האחיד
-        parts = []
-        if final_street or num:
-            parts.append(f"{final_street} {num}".strip())
-            
-        if data.get('apt'): parts.append(f"דירה {data['apt']}")
-        if data.get('floor'): parts.append(f"קומה {data['floor']}")
+    failed.to_excel(failed_path, index=False)
+    good_addresses.to_excel(good_path, index=False)
+    good_original.to_excel(original_path, index=False)
 
-        final_address = " / ".join(parts)
-        if data.get('extra'): final_address += f" ({data['extra']})"
-        
-        if not final_address.strip():
-            final_address = combined
-
-        return index, final_address, google_status, coordinates
-
-    except Exception as e:
-        return index, combined, f"שגיאה טכנית: {str(e)[:20]}", ""
+    return {
+        "failed": failed_path,
+        "good_addresses": good_path,
+        "good_original": original_path,
+    }
 
 
-# --- הפונקציה הראשית ---
-def main():
-    print("מתחיל עבודה...")
-    root = tk.Tk()
-    root.withdraw()
+def main() -> None:
+    import argparse
 
-    o_key = KeyRequester("OpenAI Key", "הדביקי מפתח ChatGPT:").result
-    if not o_key: return
-    g_key = KeyRequester("Google Key", "הדביקי מפתח Google Maps:").result
-    if not g_key: return
+    parser = argparse.ArgumentParser(description="Clean Routecraft raw order addresses.")
+    parser.add_argument("--input", required=True)
+    parser.add_argument("--output-dir", default=".")
+    args = parser.parse_args()
 
-    client = OpenAI(api_key=o_key)
-    path = filedialog.askopenfilename(title="בחרי אקסל")
-    if not path: return
-
-    try:
-        df = pd.read_excel(path).fillna('')
-    except Exception as e:
-        messagebox.showerror("שגיאה", f"שגיאה בטעינת הקובץ:\n{e}")
-        return
-
-    required_cols = ['ship_to_street1', 'ship_to_street2', 'site_name']
-    for col in required_cols:
-        if col not in df.columns:
-            df[col] = '' 
-
-    addresses = [""] * len(df)
-    statuses = [""] * len(df)
-    coords_list = [""] * len(df)
-
-    print(f"מעבד {len(df)} שורות במקביל (משתמש ב-10 תהליכונים)...")
-
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {
-            executor.submit(
-                process_address_clean, 
-                i, 
-                row.get('ship_to_street1', ''), 
-                row.get('ship_to_street2', ''), 
-                row.get('site_name', ''), 
-                client, 
-                g_key
-            ): i 
-            for i, row in df.iterrows()
-        }
-        
-        processed = 0
-        for future in as_completed(futures):
-            idx, addr, stat, coords = future.result()
-            addresses[idx] = addr
-            statuses[idx] = stat
-            coords_list[idx] = coords
-            
-            processed += 1
-            if processed % 10 == 0 or processed == len(df):
-                print(f"עובדו {processed}/{len(df)} שורות...")
-
-    df['ship_to_street_final'] = addresses
-    df['is_real_address'] = statuses 
-    df['coordinates'] = coords_list
-
-    save_path = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile="ניקוי_כתובות_מדויק.xlsx")
-    if save_path:
-        try:
-            df.to_excel(save_path, index=False)
-            messagebox.showinfo("סיום", "העיבוד הושלם בהצלחה. הקובץ נשמר.")
-        except Exception as e:
-             messagebox.showerror("שגיאה", f"לא ניתן לשמור את הקובץ. ייתכן שהוא פתוח בתוכנה אחרת:\n{e}")
+    paths = clean_raw_orders(Path(args.input), Path(args.output_dir))
+    for name, path in paths.items():
+        print(f"{name}: {path}")
 
 
-# --- הסטרטר שמריץ את הכל ---
 if __name__ == "__main__":
     main()

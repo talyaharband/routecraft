@@ -4,8 +4,12 @@ import math
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
-from bidi.algorithm import get_display
 import time
+
+try:
+    from bidi.algorithm import get_display
+except ModuleNotFoundError:
+    get_display = lambda value: value
 
 # Warehouse coordinates
 WAREHOUSE_LAT = 31.77927525
@@ -71,11 +75,12 @@ def load_distance_matrix(cluster_group, matrix_folder):
     
     # Search recursively in the folder, and intelligently parse the number mathematically
     all_matrices = list(folder_path.rglob("matrix_*.xlsx"))
+    all_matrices.extend(folder_path.rglob("05_distance_matrix_group-*.xlsx"))
     matrix_files = []
     
     target_prefix = f"matrix_{cluster_group}_"
     for file in all_matrices:
-        if file.name.startswith(target_prefix):
+        if file.name.startswith(target_prefix) or file.name == f"05_distance_matrix_group-{cluster_group}.xlsx":
             matrix_files.append(file)
             
     if not matrix_files:
@@ -427,29 +432,11 @@ def run_tsp_on_matrix(matrix_df):
     return best_route, best_cost
 
 
-def run_multi_cluster_tsp_test():
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
+def run_multi_cluster_tsp(kmeans_path, matrix_folder, output_path=None, test_mode=True):
+    kmeans_path = Path(kmeans_path)
+    matrix_folder = Path(matrix_folder)
 
-    # 1. Select k-means output Excel
-    print("Step 1: Select k-means output file")
-    kmeans_path = filedialog.askopenfilename(
-        title="Select k-means output Excel (with cluster_group)",
-        filetypes=[("Excel files", "*.xlsx *.xls")]
-    )
-    if not kmeans_path:
-        print("❌ Cancelled")
-        return
-
-    # 2. Select distance matrices folder
-    print("\nStep 2: Select folder with distance matrices")
-    matrix_folder = filedialog.askdirectory(title="Select folder with matrix_*.xlsx files")
-    if not matrix_folder:
-        print("❌ Cancelled")
-        return
-
-    # 3. Load data
+    # 1. Load data
     print("\n" + "="*60)
     print("📂 LOADING DATA")
     print("="*60)
@@ -760,13 +747,45 @@ def run_multi_cluster_tsp_test():
 
     # 7. Export to Excel
     print("\n💾 Exporting to Excel...")
-    export_journey_to_excel(all_drivers_results, df_addresses, test_mode=True)
+    return export_journey_to_excel(
+        all_drivers_results,
+        df_addresses,
+        test_mode=test_mode,
+        output_path=output_path,
+    )
 
 
-def export_journey_to_excel(all_drivers_results, df_addresses, test_mode=False):
+def run_multi_cluster_tsp_test():
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+
+    print("Step 1: Select k-means output file")
+    kmeans_path = filedialog.askopenfilename(
+        title="Select k-means output Excel (with cluster_group)",
+        filetypes=[("Excel files", "*.xlsx *.xls")]
+    )
+    if not kmeans_path:
+        print("Cancelled")
+        return
+
+    print("\nStep 2: Select folder with distance matrices")
+    matrix_folder = filedialog.askdirectory(title="Select folder with matrix files")
+    if not matrix_folder:
+        print("Cancelled")
+        return
+
+    run_multi_cluster_tsp(kmeans_path, matrix_folder, test_mode=True)
+
+
+def export_journey_to_excel(all_drivers_results, df_addresses, test_mode=False, output_path=None):
     """Export journey to Excel file"""
-    filename = "multi_vehicle_journey_TEST.xlsx" if test_mode else "multi_vehicle_journey.xlsx"
-    excel_path = Path.home() / "Desktop" / filename
+    if output_path is None:
+        filename = "multi_vehicle_journey_TEST.xlsx" if test_mode else "multi_vehicle_journey.xlsx"
+        excel_path = Path.home() / "Desktop" / filename
+    else:
+        excel_path = Path(output_path)
+        excel_path.parent.mkdir(parents=True, exist_ok=True)
     
     with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
         # Summary sheet
@@ -808,6 +827,7 @@ def export_journey_to_excel(all_drivers_results, df_addresses, test_mode=False):
             pd.DataFrame([{'Info': 'No routes delivered'}]).to_excel(writer, sheet_name='Detailed Routes', index=False)
     
     print(f"✅ Saved to: {excel_path}")
+    return excel_path
 
 
 if __name__ == "__main__":

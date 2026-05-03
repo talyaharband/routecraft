@@ -12,7 +12,6 @@ import re
 import sys
 import types
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -89,15 +88,6 @@ def get_google_key(args: argparse.Namespace) -> str:
         raise RuntimeError(
             "Missing Google Maps API key. Set GOOGLE_MAPS_API_KEY in .env, "
             "or pass --google-api-key."
-        )
-    return key
-
-
-def get_openai_key(args: argparse.Namespace) -> str:
-    key = args.openai_api_key or os.getenv("OPENAI_API_KEY")
-    if not key:
-        raise RuntimeError(
-            "Missing OpenAI API key. Set OPENAI_API_KEY in .env or pass --openai-api-key."
         )
     return key
 
@@ -186,6 +176,75 @@ def get_lat_lng(address: str, key: str) -> tuple[Any, Any]:
     return None, None
 
 
+def formatted_address_matches_city(formatted_address: str, city: str) -> bool:
+    formatted = clean_cell(formatted_address)
+    city = clean_cell(city)
+    if not city:
+        return True
+    if city in formatted:
+        return True
+    aliases = {
+        "מודיעין": ["מודיעין-מכבים-רעות", "מודיעין מכבים רעות"],
+        "תל אביב": ["תל אביב-יפו", "תל אביב יפו"],
+    }
+    return any(alias in formatted for alias in aliases.get(city, []))
+
+
+def geocode_precise_address(address: str, key: str, city: str = "") -> tuple[Any, Any, bool, str]:
+    response = requests.get(
+        "https://maps.googleapis.com/maps/api/geocode/json",
+        params={
+            "address": address,
+            "components": "country:IL",
+            "language": "he",
+            "key": key,
+        },
+        timeout=30,
+    ).json()
+    if response.get("status") != "OK" or not response.get("results"):
+        return None, None, False, f"google could not accurately find this address: {response.get('status', 'no result')}"
+
+    precise_types = {"street_address", "premise", "subpremise"}
+    wrong_city_precise = False
+    for result in response["results"]:
+        result_types = set(result.get("types", []))
+        if not result_types.intersection(precise_types):
+            continue
+        formatted = result.get("formatted_address", "")
+        if not formatted_address_matches_city(formatted, city):
+            wrong_city_precise = True
+            continue
+
+        location = result.get("geometry", {}).get("location", {})
+        lat = location.get("lat")
+        lng = location.get("lng")
+        if lat is None or lng is None:
+            return None, None, False, "google could not accurately find this address: missing coordinates"
+        return lat, lng, True, f"google precise match: {formatted}"
+
+    if wrong_city_precise:
+        return None, None, False, "google found a precise address, but not in the requested city"
+    return None, None, False, "google could not accurately find this address"
+
+
+def record_geocode_failures(run_dir: Path, failed_rows: list[dict[str, Any]]) -> Path | None:
+    if not failed_rows:
+        return None
+
+    failure_path = run_dir / "02a_failed_geocoding_addresses.xlsx"
+    failed_df = pd.DataFrame(failed_rows)
+    failed_df.to_excel(failure_path, index=False)
+
+    cumulative_path = run_dir / "01a_failed_addresses.xlsx"
+    if cumulative_path.exists():
+        existing = pd.read_excel(cumulative_path).fillna("")
+        cumulative = pd.concat([existing, failed_df], ignore_index=True, sort=False)
+    else:
+        cumulative = failed_df
+    cumulative.to_excel(cumulative_path, index=False)
+    return failure_path
+
+
 def calculate_haversine(lat1: Any, lon1: Any, lat2: Any, lon2: Any) -> float:
     if pd.isna(lat1) or pd.isna(lon1) or pd.isna(lat2) or pd.isna(lon2):
         return float("inf")
@@ -199,69 +258,19 @@ def calculate_haversine(lat1: Any, lon1: Any, lat2: Any, lon2: Any) -> float:
 
 def stage_1_cleanup(input_path: Path, run_dir: Path, args: argparse.Namespace) -> tuple[Path, StageResult]:
     cleanup = import_script(ROOT / "data.cleanup.py", "routecraft_data_cleanup")
-    from openai import OpenAI
-
-    google_key = get_google_key(args)
-    openai_key = get_openai_key(args)
-    client = OpenAI(api_key=openai_key)
-    df = pd.read_excel(input_path).fillna("")
-
-    for col in ["ship_to_street1", "ship_to_street2", "site_name"]:
-        if col not in df.columns:
-            df[col] = ""
-
-    addresses = [""] * len(df)
-    statuses = [""] * len(df)
-    coords = [""] * len(df)
-
-    with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-        futures = {
-            executor.submit(
-                cleanup.process_address_clean,
-                i,
-                row.get("ship_to_street1", ""),
-                row.get("ship_to_street2", ""),
-                row.get("site_name", ""),
-                client,
-                google_key,
-            ): i
-            for i, row in df.iterrows()
-        }
-        for future in as_completed(futures):
-            idx, address, status, coord = future.result()
-            addresses[idx] = address
-            statuses[idx] = status
-            coords[idx] = coord
-
-    df["ship_to_street_final"] = addresses
-    df["is_real_address"] = statuses
-    df["coordinates"] = coords
-
-    cleanup_path = run_dir / "01_cleanup_raw_orders.xlsx"
-    df.to_excel(cleanup_path, index=False)
-
-    shaped_rows = []
-    for _, row in df.iterrows():
-        street, number = split_street_and_number(row.get("ship_to_street_final", ""))
-        shaped_rows.append(
-            {
-                "City": clean_cell(row.get("site_name", "")),
-                "Street_Name": street,
-                "House_Number": number,
-            }
-        )
-    shaped_df = pd.DataFrame(shaped_rows)
-    shaped_path = run_dir / "01b_addresses_for_geocoding.xlsx"
-    shaped_df.to_excel(shaped_path, index=False)
+    paths = cleanup.clean_raw_orders(input_path, run_dir)
+    failed_path = paths["failed"]
+    shaped_path = paths["good_addresses"]
+    original_path = paths["good_original"]
 
     return shaped_path, StageResult(
         1,
         "Clean raw order addresses",
         "completed",
-        [cleanup_path, shaped_path],
+        [failed_path, shaped_path, original_path],
         [
-            "Automated the manual handoff noted in PIPELINE.md by reshaping "
-            "ship_to_street_final into City, Street_Name, House_Number."
+            "Deleted required delivery date, grouped by city, merged ship_to_street1/2, "
+            "and wrote failed, flow-ready, and original-format good-address files."
         ],
     )
 
@@ -274,12 +283,31 @@ def stage_2_geocode(input_path: Path, run_dir: Path, args: argparse.Namespace) -
 
     city_col, street_col, number_col = df.columns[:3]
     rows = []
+    failed_rows = []
     for _, row in df.iterrows():
         city = clean_cell(row[city_col])
         street = clean_cell(row[street_col])
         house_number = clean_cell(row[number_col])
         query = f"{street} {house_number}, {city}".strip()
-        lat, lng = mock_lat_lng(query) if args.mock_google else get_lat_lng(query, google_key)
+        if args.mock_google:
+            lat, lng = mock_lat_lng(query)
+            is_precise = True
+            status = "mock precise match"
+        else:
+            lat, lng, is_precise, status = geocode_precise_address(query, google_key, city)
+
+        if not is_precise:
+            failed_rows.append(
+                {
+                    "City": city,
+                    "Street_Name": street,
+                    "House_Number": house_number,
+                    "merged_address": query,
+                    "cleanup_status": status,
+                }
+            )
+            continue
+
         rows.append(
             {
                 "City": city,
@@ -287,17 +315,29 @@ def stage_2_geocode(input_path: Path, run_dir: Path, args: argparse.Namespace) -
                 "House_Number": house_number,
                 "LAT": lat,
                 "LNG": lng,
+                "geocode_status": status,
             }
         )
 
     output_path = run_dir / "02_geocoded_addresses.xlsx"
+    if not rows:
+        record_geocode_failures(run_dir, failed_rows)
+        raise RuntimeError("Stage 2 did not find any addresses with precise Google geocoding matches.")
+
     pd.DataFrame(rows).to_excel(output_path, index=False)
-    return output_path, StageResult(2, "Geocode addresses", "completed", [output_path])
+    failure_path = record_geocode_failures(run_dir, failed_rows)
+    output_files = [output_path] + ([failure_path] if failure_path else [])
+    notes = []
+    if failed_rows:
+        notes.append(
+            f"{len(failed_rows)} addresses were moved to the error file because Google could not accurately find them."
+        )
+    return output_path, StageResult(2, "Geocode addresses", "completed", output_files, notes)
 
 
 def stage_3_cluster(input_path: Path, run_dir: Path, args: argparse.Namespace) -> tuple[Path, StageResult]:
     df = pd.read_excel(input_path)
-    required = {"Street_Name", "House_Number", "LAT", "LNG"}
+    required = {"City", "Street_Name", "House_Number", "LAT", "LNG"}
     missing = required.difference(df.columns)
     if missing:
         raise RuntimeError(f"Stage 3 input is missing columns: {', '.join(sorted(missing))}")
@@ -308,21 +348,23 @@ def stage_3_cluster(input_path: Path, run_dir: Path, args: argparse.Namespace) -
         raise RuntimeError("Stage 3 has no rows with numeric House_Number.")
 
     df["House_Number"] = df["House_Number"].astype(int)
-    df = df.sort_values(by=["Street_Name", "House_Number"]).reset_index(drop=True)
+    df = df.sort_values(by=["City", "Street_Name", "House_Number"]).reset_index(drop=True)
 
     clusters: list[list[dict[str, Any]]] = []
-    anchor = df.iloc[0]
-    current = [anchor.to_dict()]
-    for i in range(1, len(df)):
-        row = df.iloc[i]
-        distance = calculate_haversine(anchor["LAT"], anchor["LNG"], row["LAT"], row["LNG"])
-        if row["Street_Name"] == anchor["Street_Name"] and distance <= args.cluster_threshold_meters:
-            current.append(row.to_dict())
-        else:
-            clusters.append(current)
-            anchor = row
-            current = [anchor.to_dict()]
-    clusters.append(current)
+    for _city, city_df in df.groupby("City", sort=False):
+        city_df = city_df.sort_values(by=["Street_Name", "House_Number"]).reset_index(drop=True)
+        anchor = city_df.iloc[0]
+        current = [anchor.to_dict()]
+        for i in range(1, len(city_df)):
+            row = city_df.iloc[i]
+            distance = calculate_haversine(anchor["LAT"], anchor["LNG"], row["LAT"], row["LNG"])
+            if row["Street_Name"] == anchor["Street_Name"] and distance <= args.cluster_threshold_meters:
+                current.append(row.to_dict())
+            else:
+                clusters.append(current)
+                anchor = row
+                current = [anchor.to_dict()]
+        clusters.append(current)
 
     reps = []
     for cluster_id, cluster_rows in enumerate(clusters):
@@ -341,16 +383,25 @@ def stage_3_cluster(input_path: Path, run_dir: Path, args: argparse.Namespace) -
 
 def stage_4_group(input_path: Path, run_dir: Path, args: argparse.Namespace) -> tuple[Path, StageResult]:
     df = pd.read_excel(input_path)
-    if df.shape[1] < 5:
-        raise RuntimeError("Stage 4 input must include LAT/LNG in columns D and E.")
+    required = {"City", "LAT", "LNG"}
+    missing = required.difference(df.columns)
+    if missing:
+        raise RuntimeError(f"Stage 4 input is missing columns: {', '.join(sorted(missing))}")
 
-    coords = df.iloc[:, [3, 4]].values
-    num_addresses = len(df)
-    if num_addresses <= args.max_group_size:
-        df["cluster_group"] = 0
-        note = f"{num_addresses} rows fit in one group."
-    else:
-        from k_means_constrained import KMeansConstrained
+    from k_means_constrained import KMeansConstrained
+
+    df["cluster_group"] = pd.NA
+    next_group = 0
+    notes = []
+    for city, city_df in df.groupby("City", sort=False):
+        city_indices = city_df.index
+        coords = city_df[["LAT", "LNG"]].values
+        num_addresses = len(city_df)
+        if num_addresses <= args.max_group_size:
+            df.loc[city_indices, "cluster_group"] = next_group
+            notes.append(f"{city}: {num_addresses} rows fit in group {next_group}.")
+            next_group += 1
+            continue
 
         n_clusters = int(np.ceil(num_addresses / args.max_group_size))
         clf = KMeansConstrained(
@@ -359,12 +410,17 @@ def stage_4_group(input_path: Path, run_dir: Path, args: argparse.Namespace) -> 
             size_max=args.max_group_size,
             random_state=42,
         )
-        df["cluster_group"] = clf.fit_predict(coords)
-        note = f"Created {n_clusters} constrained groups."
+        local_labels = clf.fit_predict(coords)
+        label_map = {label: next_group + offset for offset, label in enumerate(sorted(set(local_labels)))}
+        df.loc[city_indices, "cluster_group"] = [label_map[label] for label in local_labels]
+        notes.append(f"{city}: created groups {next_group}-{next_group + n_clusters - 1}.")
+        next_group += n_clusters
+
+    df["cluster_group"] = df["cluster_group"].astype(int)
 
     output_path = run_dir / "04_clustered_delivery_groups.xlsx"
     df.to_excel(output_path, index=False)
-    return output_path, StageResult(4, "Create delivery groups", "completed", [output_path], [note])
+    return output_path, StageResult(4, "Create delivery groups", "completed", [output_path], notes)
 
 
 def stage_5_distance_matrices(input_path: Path, run_dir: Path, args: argparse.Namespace) -> tuple[list[Path], StageResult]:
@@ -378,10 +434,10 @@ def stage_5_distance_matrices(input_path: Path, run_dir: Path, args: argparse.Na
 
     df = pd.read_excel(input_path)
     df.columns = df.columns.str.strip()
-    if df.shape[1] < 9:
-        raise RuntimeError("Stage 5 input must include column I with the group number.")
+    if "cluster_group" not in df.columns:
+        raise RuntimeError("Stage 5 input must include a cluster_group column.")
 
-    group_col = df.columns[8]
+    group_col = "cluster_group"
     grouped_frames = {
         group_value: group_df.reset_index(drop=True)
         for group_value, group_df in df.groupby(group_col, dropna=True)
@@ -409,6 +465,214 @@ def stage_5_distance_matrices(input_path: Path, run_dir: Path, args: argparse.Na
         matrix_paths.append(matrix_path)
 
     return matrix_paths, StageResult(5, "Build distance matrices", "completed", matrix_paths)
+
+
+def stage_6_delivery_plan(input_path: Path, matrix_folder: Path, run_dir: Path) -> tuple[Path, StageResult]:
+    deliveries = import_script(ROOT / "deliveries.py", "routecraft_deliveries")
+    output_path = run_dir / "06_delivery_plan.xlsx"
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        deliveries.run_multi_cluster_tsp(
+            kmeans_path=input_path,
+            matrix_folder=matrix_folder,
+            output_path=output_path,
+            test_mode=True,
+        )
+    log_path = run_dir / "06_delivery_plan.log"
+    log_path.write_text(stdout.getvalue(), encoding="utf-8")
+    if stderr.getvalue():
+        (run_dir / "06_delivery_plan.err.log").write_text(stderr.getvalue(), encoding="utf-8")
+    html_path = render_delivery_plan_html(output_path, run_dir / "06_delivery_plan.html")
+    return output_path, StageResult(
+        6,
+        "Plan multi-driver deliveries",
+        "completed",
+        [output_path, html_path, log_path],
+    )
+
+
+def render_delivery_plan_html(workbook_path: Path, output_path: Path) -> Path:
+    summary_df = pd.read_excel(workbook_path, sheet_name="Summary")
+    detail_df = pd.read_excel(workbook_path, sheet_name="Detailed Routes")
+    order_details = load_order_details(output_path.parent / "01c_good_orders_original_format.xlsx")
+
+    summary_cards = []
+    if not summary_df.empty:
+        totals = {
+            "Drivers": len(summary_df),
+            "Addresses": int(pd.to_numeric(summary_df["Addresses Delivered"], errors="coerce").fillna(0).sum()),
+            "Clusters": int(pd.to_numeric(summary_df["Clusters Visited"], errors="coerce").fillna(0).sum()),
+            "Max Shift": f"{pd.to_numeric(summary_df['Total Time (hours)'], errors='coerce').max():.2f} h",
+        }
+        for label, value in totals.items():
+            summary_cards.append(
+                f"<div class=\"metric\"><span>{html.escape(label)}</span><strong>{html.escape(str(value))}</strong></div>"
+            )
+
+    driver_sections = []
+    for driver, driver_df in detail_df.groupby("Driver", sort=False):
+        steps = []
+        for _, row in driver_df.iterrows():
+            route_nodes = [
+                str(part).strip()
+                for part in str(row.get("Route Path", "")).split("→")
+                if str(part).strip()
+            ]
+            route_html = "".join(
+                render_route_node(node, str(row.get("City", "")), order_details)
+                for node in route_nodes
+            )
+            steps.append(
+                "<article class=\"step\">"
+                "<div class=\"step-head\">"
+                f"<span>Step {html.escape(str(row.get('Step', '')))}</span>"
+                f"<strong>{html.escape(str(row.get('City', '')))} / Group {html.escape(str(row.get('Cluster', '')))}</strong>"
+                "</div>"
+                "<div class=\"times\">"
+                f"<span>Total {html.escape(str(row.get('Total Time (min)', '')))} min</span>"
+                f"<span>Travel {html.escape(str(row.get('Travel Time', '')))} min</span>"
+                f"<span>Delivery {html.escape(str(row.get('Delivery Time', '')))} min</span>"
+                f"<span>Shift {html.escape(str(row.get('Shift Time So Far', '')))} min</span>"
+                "</div>"
+                f"<ol class=\"route\">{route_html}</ol>"
+                "</article>"
+            )
+        driver_sections.append(
+            "<section class=\"driver\">"
+            f"<h2>{html.escape(str(driver))}</h2>"
+            f"{''.join(steps)}"
+            "</section>"
+        )
+
+    summary_table = summary_df.to_html(index=False, escape=True, classes="data-table")
+
+    output_path.write_text(
+        f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Routecraft Delivery Plan</title>
+  <style>
+    body {{ margin: 0; font-family: Arial, sans-serif; background: #f5f7f8; color: #1f2933; }}
+    header {{ padding: 28px 36px; background: #17324d; color: white; }}
+    main {{ padding: 28px 36px 48px; max-width: 1280px; margin: 0 auto; }}
+    h1, h2 {{ margin: 0; }}
+    .subtitle {{ margin-top: 8px; color: #d7e2ea; }}
+    .metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 22px 0; }}
+    .metric {{ background: white; border: 1px solid #d9e0e7; padding: 14px 16px; border-radius: 8px; }}
+    .metric span {{ display: block; color: #65717d; font-size: 13px; }}
+    .metric strong {{ display: block; margin-top: 6px; font-size: 26px; }}
+    .data-table {{ width: 100%; border-collapse: collapse; background: white; border: 1px solid #d9e0e7; margin-bottom: 24px; }}
+    th, td {{ padding: 10px 12px; border-bottom: 1px solid #e7ebef; text-align: left; vertical-align: top; }}
+    th {{ background: #edf2f6; font-size: 12px; text-transform: uppercase; letter-spacing: 0; }}
+    .driver {{ margin-top: 24px; }}
+    .driver h2 {{ padding-bottom: 10px; border-bottom: 2px solid #17324d; }}
+    .step {{ background: white; border: 1px solid #d9e0e7; border-radius: 8px; margin-top: 14px; padding: 16px; }}
+    .step-head {{ display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }}
+    .step-head span {{ color: #65717d; }}
+    .times {{ display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }}
+    .times span {{ background: #edf2f6; padding: 6px 9px; border-radius: 999px; font-size: 13px; }}
+    .route {{ display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0; list-style: none; }}
+    .route li {{ border: 1px solid #cfd8e3; padding: 7px 9px; border-radius: 6px; background: #fbfcfd; max-width: 360px; }}
+    .route li strong {{ display: block; }}
+    .order-details {{ margin-top: 8px; display: grid; gap: 6px; }}
+    .order-detail {{ border-top: 1px solid #e2e8f0; padding-top: 6px; font-size: 12px; color: #52606d; }}
+    .order-detail span {{ display: block; font-weight: 700; }}
+    .order-detail p {{ margin: 3px 0 0; color: #1f2933; }}
+    .route li:not(:last-child)::after {{ content: "→"; margin-left: 8px; color: #8a96a3; }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Routecraft Delivery Plan</h1>
+    <div class="subtitle">Generated {html.escape(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))}</div>
+  </header>
+  <main>
+    <div class="metrics">{''.join(summary_cards)}</div>
+    {summary_table}
+    {''.join(driver_sections)}
+  </main>
+</body>
+</html>
+""",
+        encoding="utf-8",
+    )
+    return output_path
+
+
+def normalize_detail_key(city: str, address: str) -> tuple[str, str, str]:
+    address = clean_cell(address).replace(",", " ")
+    city = clean_cell(city)
+    if city:
+        address = re.sub(re.escape(city), " ", address, flags=re.IGNORECASE)
+    address = re.sub(r"\s+", " ", address).strip()
+    match = re.search(r"\d+[\wא-ת/-]*", address)
+    if not match:
+        return city, address, ""
+    number = match.group(0).replace(".0", "").strip()
+    street = address[: match.start()].strip(" ,-/")
+    if not street:
+        street = address[match.end() :].strip(" ,-/")
+    return city, re.sub(r"\s+", " ", street), number
+
+
+def load_order_details(path: Path) -> dict[tuple[str, str, str], list[dict[str, str]]]:
+    if not path.exists():
+        return {}
+    df = pd.read_excel(path).fillna("")
+    normalized_cols = {str(col).strip().lower().replace("_", " "): col for col in df.columns}
+
+    def col(*names: str) -> str | None:
+        for name in names:
+            found = normalized_cols.get(name)
+            if found is not None:
+                return found
+        return None
+
+    order_col = col("order id", "orderid")
+    client_col = col("client id", "clientid")
+    site_col = col("site id", "siteid")
+    comments_col = col("comments", "comment", "notes")
+
+    details: dict[tuple[str, str, str], list[dict[str, str]]] = {}
+    for _, row in df.iterrows():
+        key = normalize_detail_key(row.get("City", ""), f"{row.get('Street_Name', '')} {row.get('House_Number', '')}")
+        item = {
+            "order": clean_cell(row.get(order_col, "")) if order_col else "",
+            "client": clean_cell(row.get(client_col, "")) if client_col else "",
+            "site": clean_cell(row.get(site_col, "")) if site_col else "",
+            "comments": clean_cell(row.get(comments_col, "")) if comments_col else "",
+        }
+        details.setdefault(key, []).append(item)
+    return details
+
+
+def render_route_node(node: str, city: str, order_details: dict[tuple[str, str, str], list[dict[str, str]]]) -> str:
+    key = normalize_detail_key(city, node)
+    details = order_details.get(key, [])
+    detail_html = ""
+    if details:
+        rows = []
+        for item in details:
+            meta = " | ".join(
+                part
+                for part in [
+                    f"Order {item['order']}" if item["order"] else "",
+                    f"Client {item['client']}" if item["client"] else "",
+                    f"Site {item['site']}" if item["site"] else "",
+                ]
+                if part
+            )
+            rows.append(
+                "<div class=\"order-detail\">"
+                f"{'<span>' + html.escape(meta) + '</span>' if meta else ''}"
+                f"{'<p>' + html.escape(item['comments']) + '</p>' if item['comments'] else ''}"
+                "</div>"
+            )
+        detail_html = f"<div class=\"order-details\">{''.join(rows)}</div>"
+    return f"<li><strong>{html.escape(node)}</strong>{detail_html}</li>"
 
 
 def run_tsp_script(matrix_path: Path) -> dict[str, Any]:
@@ -589,7 +853,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-stage", type=int, default=1, choices=range(1, 7))
     parser.add_argument("--runs-dir", default=str(RUNS_DIR))
     parser.add_argument("--google-api-key")
-    parser.add_argument("--openai-api-key")
     parser.add_argument("--distance-api-key")
     parser.add_argument(
         "--mock-google",
@@ -624,12 +887,18 @@ def main() -> int:
         if args.start_stage <= 4:
             current, result = stage_4_group(Path(current), run_dir, args)
             stage_results.append(result)
+        delivery_input_path: Path | None = None
+        matrix_folder = run_dir
         if args.start_stage <= 5:
+            delivery_input_path = Path(current)
             current, result = stage_5_distance_matrices(Path(current), run_dir, args)
             stage_results.append(result)
+        else:
+            matrix_folder = input_path.parent
         if args.start_stage <= 6:
-            matrix_paths = current if isinstance(current, list) else [Path(current)]
-            current, result = stage_6_tsp_html(matrix_paths, run_dir)
+            if delivery_input_path is None:
+                delivery_input_path = Path(current)
+            current, result = stage_6_delivery_plan(delivery_input_path, matrix_folder, run_dir)
             stage_results.append(result)
 
         print(f"Flow completed. Run folder: {run_dir}")

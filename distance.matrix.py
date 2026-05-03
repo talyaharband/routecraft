@@ -69,12 +69,29 @@ def get_coords(addr, key):
 
 
 def build_full_addresses(df):
-    if df.shape[1] >= 2:
+    columns = {str(col).strip(): col for col in df.columns}
+    if {"City", "Street_Name", "House_Number"}.issubset(columns):
+        addresses = []
+        for _, row in df.iterrows():
+            city = str(row[columns["City"]]).replace("nan", "").strip()
+            street = str(row[columns["Street_Name"]]).replace("nan", "").strip()
+            house = str(row[columns["House_Number"]]).replace("nan", "").replace(".0", "").strip()
+            street_address = " ".join(part for part in [street, house] if part)
+            addresses.append(", ".join(part for part in [street_address, city] if part))
+    elif df.shape[1] >= 3:
+        addresses = (
+            df.iloc[:, 1].astype(str).str.replace("nan", "", regex=False).str.strip()
+            + " "
+            + df.iloc[:, 2].astype(str).str.replace("nan", "", regex=False).str.replace(".0", "", regex=False).str.strip()
+            + ", "
+            + df.iloc[:, 0].astype(str).str.replace("nan", "", regex=False).str.strip()
+        ).tolist()
+    elif df.shape[1] >= 2:
         addresses = (df.iloc[:, 1].astype(str) + ", " + df.iloc[:, 0].astype(str)).tolist()
     else:
         addresses = [str(addr) + ", Lod" for addr in df.iloc[:, 0].tolist()]
 
-    return [addr.replace("nan", "").strip(", ") for addr in addresses]
+    return [re.sub(r"\s+", " ", addr).strip(", ") for addr in addresses]
 
 
 def sanitize_group_value(group_value):
