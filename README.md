@@ -110,7 +110,7 @@ To test stages 2 through 6 without spending Google API quota, use the determinis
 python .\flow.py --start-stage 2 --input .\addresses\good_addresses.xlsx --mock-google
 ```
 
-`--mock-google` does not mock stage 1 cleanup.
+`--mock-google` does not mock stage 1 cleanup. It mocks Google calls in later stages, including delivery origin travel times.
 
 ## What `cluster.py` Expects
 

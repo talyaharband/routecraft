@@ -6,341 +6,85 @@
   <title>Routecraft Pipeline</title>
   <style>
     :root {
-      --ink: #18212f;
-      --muted: #5b6472;
-      --line: #cfd7e3;
+      --ink: #1f2933;
+      --muted: #64707d;
+      --line: #d7dee8;
+      --page: #f5f7fa;
       --panel: #ffffff;
-      --page: #f5f7fb;
-      --blue: #2764c8;
-      --green: #18845f;
-      --amber: #a76008;
-      --rose: #b7425b;
-      --focus: #111827;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --blue: #245fb8;
+      --green: #17775c;
+      --rose: #a63f5f;
+      font-family: Arial, sans-serif;
     }
-
-    * {
-      box-sizing: border-box;
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--page); color: var(--ink); }
+    main { max-width: 1180px; margin: 0 auto; padding: 30px 18px 42px; }
+    header { display: flex; justify-content: space-between; gap: 18px; align-items: end; margin-bottom: 22px; }
+    h1 { margin: 0; font-size: 40px; letter-spacing: 0; }
+    p { margin: 8px 0 0; color: var(--muted); line-height: 1.45; }
+    a { color: var(--blue); font-weight: 700; text-decoration: none; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr); gap: 18px; align-items: start; }
+    .flow, .details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+    .flow { display: grid; grid-template-columns: repeat(3, minmax(170px, 1fr)); gap: 14px 30px; }
+    .node-wrap { position: relative; min-height: 124px; }
+    .node-wrap::after { content: "->"; position: absolute; top: 48%; right: -23px; color: #7a8592; font-weight: 800; }
+    .node-wrap:nth-child(3n)::after, .node-wrap.end::after { content: ""; }
+    button.node { width: 100%; min-height: 124px; height: 100%; text-align: left; cursor: pointer; background: #fbfcfe; border: 1px solid var(--line); border-left: 7px solid var(--blue); border-radius: 8px; padding: 13px; color: var(--ink); display: flex; flex-direction: column; justify-content: space-between; gap: 10px; }
+    button.node[data-kind="data"] { border-left-color: var(--green); }
+    button.node[data-kind="route"] { border-left-color: var(--rose); }
+    button.node[aria-pressed="true"] { outline: 3px solid rgba(36, 95, 184, 0.25); background: #eef5ff; }
+    .eyebrow { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; }
+    .title { display: block; font-size: 18px; font-weight: 800; line-height: 1.15; }
+    .meta { color: var(--muted); font-size: 13px; line-height: 1.3; }
+    .details { position: sticky; top: 18px; }
+    .details h2 { margin: 0; font-size: 26px; }
+    .script { margin-top: 8px; color: var(--blue); font-family: Consolas, monospace; font-weight: 700; }
+    .section { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 14px; }
+    .section h3 { margin: 0 0 8px; color: var(--muted); font-size: 13px; text-transform: uppercase; }
+    ul { margin: 0; padding-left: 18px; }
+    li { margin: 6px 0; line-height: 1.35; }
+    code { background: #eef1f6; padding: 1px 4px; border-radius: 4px; }
+    @media (max-width: 900px) {
+      header { align-items: start; flex-direction: column; }
+      .layout { grid-template-columns: 1fr; }
+      .details { position: static; }
+      .flow { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+      .node-wrap::after { content: ""; }
     }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      color: var(--ink);
-      background: var(--page);
-    }
-
-    .page {
-      max-width: 1220px;
-      margin: 0 auto;
-      padding: 28px 18px 40px;
-    }
-
-    header {
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 22px;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: clamp(28px, 4vw, 44px);
-      line-height: 1.05;
-      letter-spacing: 0;
-    }
-
-    .subtitle {
-      margin: 8px 0 0;
-      color: var(--muted);
-      font-size: 16px;
-      max-width: 720px;
-    }
-
-    .doc-link {
-      flex: 0 0 auto;
-      color: var(--blue);
-      text-decoration: none;
-      font-weight: 700;
-      padding: 9px 12px;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: 8px;
-    }
-
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
-      gap: 18px;
-      align-items: start;
-    }
-
-    .flow-shell,
-    .details {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      box-shadow: 0 12px 28px rgba(25, 35, 53, 0.06);
-    }
-
-    .flow-shell {
-      padding: 18px;
-    }
-
-    .flow {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(150px, 1fr));
-      gap: 12px 28px;
-      align-items: stretch;
-    }
-
-    .node-wrap {
-      position: relative;
-      min-height: 118px;
-    }
-
-    .node-wrap::after {
-      content: "->";
-      position: absolute;
-      top: 48%;
-      right: -22px;
-      color: #6d7685;
-      font-weight: 800;
-      letter-spacing: 0;
-    }
-
-    .node-wrap.break::after,
-    .node-wrap.end::after,
-    .node-wrap.optional::after {
-      content: "";
-    }
-
-    .node {
-      width: 100%;
-      height: 100%;
-      min-height: 118px;
-      border: 2px solid transparent;
-      border-left-width: 7px;
-      border-radius: 8px;
-      background: #fbfcfe;
-      color: var(--ink);
-      padding: 13px 12px;
-      text-align: left;
-      cursor: pointer;
-      display: flex;
-      flex-direction: column;
-      gap: 9px;
-      justify-content: space-between;
-      box-shadow: inset 0 0 0 1px var(--line);
-    }
-
-    .node:focus-visible {
-      outline: 3px solid var(--focus);
-      outline-offset: 3px;
-    }
-
-    .node[aria-pressed="true"] {
-      background: #eef5ff;
-      border-color: var(--blue);
-      box-shadow: 0 10px 24px rgba(39, 100, 200, 0.16);
-    }
-
-    .node.data {
-      border-left-color: var(--amber);
-    }
-
-    .node.script {
-      border-left-color: var(--blue);
-    }
-
-    .node.group {
-      border-left-color: var(--green);
-    }
-
-    .node.route {
-      border-left-color: var(--rose);
-    }
-
-    .node.optional {
-      border-left-color: #6f55b5;
-    }
-
-    .eyebrow {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 800;
-      line-height: 1;
-      text-transform: uppercase;
-    }
-
-    .node-title {
-      display: block;
-      font-size: 18px;
-      font-weight: 800;
-      line-height: 1.12;
-      word-break: break-word;
-    }
-
-    .node-meta {
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.25;
-    }
-
-    .optional-lane {
-      grid-column: 3 / 5;
-      display: grid;
-      grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr);
-      gap: 12px 28px;
-      margin-top: 8px;
-      padding-top: 16px;
-      border-top: 1px dashed var(--line);
-    }
-
-    .details {
-      position: sticky;
-      top: 18px;
-      padding: 20px;
-    }
-
-    .details h2 {
-      margin: 0;
-      font-size: 26px;
-      line-height: 1.1;
-      letter-spacing: 0;
-    }
-
-    .script-name {
-      margin: 8px 0 18px;
-      color: var(--blue);
-      font-family: Consolas, "SFMono-Regular", monospace;
-      font-size: 14px;
-      font-weight: 700;
-    }
-
-    .detail-section {
-      border-top: 1px solid var(--line);
-      padding-top: 14px;
-      margin-top: 14px;
-    }
-
-    .detail-section h3 {
-      margin: 0 0 8px;
-      font-size: 14px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0;
-    }
-
-    .detail-section ul {
-      margin: 0;
-      padding-left: 18px;
-    }
-
-    .detail-section li {
-      margin: 6px 0;
-      line-height: 1.35;
-    }
-
-    code {
-      font-family: Consolas, "SFMono-Regular", monospace;
-      background: #eef1f6;
-      padding: 1px 4px;
-      border-radius: 4px;
-      font-size: 0.94em;
-    }
-
-    .note {
-      margin: 16px 0 0;
-      color: var(--muted);
-      line-height: 1.45;
-    }
-
-    @media (max-width: 980px) {
-      header {
-        align-items: start;
-        flex-direction: column;
-      }
-
-      .layout {
-        grid-template-columns: 1fr;
-      }
-
-      .details {
-        position: static;
-      }
-
-      .flow {
-        grid-template-columns: repeat(2, minmax(150px, 1fr));
-      }
-
-      .node-wrap:nth-child(2n)::after,
-      .node-wrap.break::after,
-      .node-wrap.end::after {
-        content: "";
-      }
-
-      .optional-lane {
-        grid-column: 1 / 3;
-      }
-    }
-
-    @media (max-width: 620px) {
-      .page {
-        padding: 20px 12px 28px;
-      }
-
-      .flow,
-      .optional-lane {
-        grid-template-columns: 1fr;
-      }
-
-      .node-wrap::after {
-        content: "";
-      }
-
-      .optional-lane {
-        grid-column: auto;
-      }
+    @media (max-width: 560px) {
+      h1 { font-size: 32px; }
+      .flow { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <main class="page">
+  <main>
     <header>
       <div>
         <h1>Routecraft Pipeline</h1>
-        <p class="subtitle">A code-first map of the Excel handoffs from raw addresses to route output.</p>
+        <p>The active automated flow only. Older standalone helper scripts are intentionally omitted.</p>
       </div>
-      <a class="doc-link" href="PIPELINE.md">PIPELINE.md</a>
+      <a href="PIPELINE.md">PIPELINE.md</a>
     </header>
 
-    <section class="layout" aria-label="Pipeline map">
-      <div class="flow-shell">
-        <div class="flow" id="flow"></div>
-      </div>
-
-      <aside class="details" aria-live="polite">
+    <section class="layout">
+      <div class="flow" id="flow"></div>
+      <aside class="details">
         <h2 id="detail-title"></h2>
-        <div class="script-name" id="detail-script"></div>
-
-        <div class="detail-section">
+        <div class="script" id="detail-script"></div>
+        <div class="section">
           <h3>Input</h3>
           <ul id="detail-input"></ul>
         </div>
-
-        <div class="detail-section">
+        <div class="section">
           <h3>Output</h3>
           <ul id="detail-output"></ul>
         </div>
-
-        <div class="detail-section">
-          <h3>What The Code Does</h3>
-          <ul id="detail-notes"></ul>
+        <div class="section">
+          <h3>Code Files Used</h3>
+          <ul id="detail-files"></ul>
         </div>
-
-        <p class="note" id="detail-note"></p>
+        <p id="detail-note"></p>
       </aside>
     </section>
   </main>
@@ -348,213 +92,88 @@
   <script>
     const stages = [
       {
-        id: "raw",
-        type: "data",
+        id: "source",
+        kind: "data",
         eyebrow: "Source",
-        title: "Raw Order Excel",
-        meta: "Order rows with messy address fields",
+        title: "Raw Orders",
+        meta: "Excel input",
         script: "input file",
-        input: ["An Excel file selected by the user."],
-        output: ["Rows passed into the cleanup step."],
-        notes: [
-          "Required columns: order id, client id, site id, site name, ship to street 1, ship to street 2, required delivery date, comments.",
-          "required delivery date is deleted during cleanup."
-        ],
-        note: "This is the operational source file before Routecraft changes it."
+        input: ["Raw order Excel."],
+        output: ["Rows passed into stage 1."],
+        files: ["flow.py"],
+        note: "Expected raw columns include order id, client id, site id, site name, ship to street 1, ship to street 2, required delivery date, and comments."
       },
       {
         id: "cleanup",
-        type: "script",
-        eyebrow: "Step 1",
+        kind: "script",
+        eyebrow: "Stage 1",
         title: "Clean Addresses",
-        meta: "data.cleanup.py",
+        meta: "Parse raw address columns",
         script: "data.cleanup.py",
-        input: [
-          "Raw order Excel with order, client, site, city, address, and comments columns.",
-          "No OpenAI key is used."
-        ],
-        output: [
-          "01a_failed_addresses.xlsx for rows that could not be parsed.",
-          "01b_addresses_for_geocoding.xlsx with City, Street_Name, House_Number.",
-          "01c_good_orders_original_format.xlsx preserving order/client/site/comments."
-        ],
-        notes: [
-          "Uses Israeli address parser rules to merge ship to street 1 and 2.",
-          "Sorts and groups orders by city name.",
-          "Keeps original comments so the final route report can show driver notes."
-        ],
-        note: "The 01b file continues through the flow; the 01c file is used later for route details."
+        input: ["Raw order Excel."],
+        output: ["01a_failed_addresses.xlsx", "01b_addresses_for_geocoding.xlsx", "01c_good_orders_original_format.xlsx"],
+        files: ["flow.py", "data.cleanup.py"],
+        note: "Deletes required delivery date, merges street columns, separates failed rows, and preserves original order/client/comment data."
       },
       {
-        id: "prep",
-        type: "data",
-        eyebrow: "Handoff",
-        title: "Prepared Address Excel",
-        meta: "City, Street_Name, House_Number",
-        script: "data.cleanup.py output",
-        input: [
-          "Created automatically by stage 1, or provided manually when starting at stage 2."
-        ],
-        output: [
-          "An Excel file whose first three columns are City, Street_Name, and House_Number."
-        ],
-        notes: [
-          "flow.py reads the three-column shape for stage 2.",
-          "addresses/good_addresses.xlsx is a checked-in example of this expected format."
-        ],
-        note: "This is the automated bridge between cleanup and geocoding."
-      },
-      {
-        id: "geocoding",
-        type: "script",
-        eyebrow: "Step 2",
+        id: "geocode",
+        kind: "script",
+        eyebrow: "Stage 2",
         title: "Geocode",
-        meta: "geocoding.py",
-        script: "geocoding.py",
-        input: [
-          "Excel selected with a file chooser.",
-          "First column: city.",
-          "Second column: street.",
-          "Third column: house number.",
-          "GOOGLE_MAPS_API_KEY or GEOCODING_API_KEY from .env."
-        ],
-        output: [
-          "02_geocoded_addresses.xlsx with City, Street_Name, House_Number, LAT, and LNG."
-        ],
-        notes: [
-          "Calls Google Geocoding once per row.",
-          "Creates a fresh output dataframe rather than preserving every original column.",
-          "Sleeps briefly between rows to avoid hitting the API too aggressively."
-        ],
-        note: "This file is the normal input for city-aware clustering."
+        meta: "Coordinates and Google validation",
+        script: "flow.py",
+        input: ["City, Street_Name, House_Number rows."],
+        output: ["02_geocoded_addresses.xlsx", "02a_failed_geocoding_addresses.xlsx when needed"],
+        files: ["flow.py"],
+        note: "Only precise Google matches in the requested city continue. Mock mode can replace Google for testing."
       },
       {
         id: "cluster",
-        type: "group",
-        eyebrow: "Step 3",
-        title: "Street Cluster",
-        meta: "cluster.py",
-        script: "cluster.py",
-        input: [
-          "Geocoded Excel with City, Street_Name, House_Number, LAT, and LNG."
-        ],
-        output: [
-          "03_nearby_address_clusters.xlsx with one representative row per cluster.",
-          "Adds cluster_id, total_orders_in_cluster, and detailed_addresses."
-        ],
-        notes: [
-          "Sorts by City, Street_Name, and House_Number.",
-          "Drops rows without a numeric House_Number.",
-          "Groups nearby addresses on the same street inside each city using a 150-meter haversine threshold."
-        ],
-        note: "The row count can shrink here because multiple nearby orders become one representative stop."
+        kind: "script",
+        eyebrow: "Stage 3",
+        title: "Cluster Nearby Stops",
+        meta: "City-aware street clustering",
+        script: "flow.py",
+        input: ["Geocoded rows with LAT and LNG."],
+        output: ["03_nearby_address_clusters.xlsx"],
+        files: ["flow.py"],
+        note: "Clusters nearby rows on the same street inside each city."
       },
       {
-        id: "kmean",
-        type: "group",
-        eyebrow: "Step 4",
-        title: "Group Stops",
-        meta: "k-mean.py",
-        script: "k-mean.py",
-        input: [
-          "Clustered Excel with City, LAT, and LNG."
-        ],
-        output: [
-          "04_clustered_delivery_groups.xlsx with a new cluster_group column."
-        ],
-        notes: [
-          "Runs grouping separately per city.",
-          "Global group numbers continue across cities instead of restarting.",
-          "Each group is capped by max group size."
-        ],
-        note: "The flow looks for the named cluster_group column."
+        id: "groups",
+        kind: "script",
+        eyebrow: "Stage 4",
+        title: "Create Groups",
+        meta: "City-aware constrained groups",
+        script: "flow.py",
+        input: ["Clustered rows."],
+        output: ["04_clustered_delivery_groups.xlsx"],
+        files: ["flow.py"],
+        note: "Group numbers continue globally across cities instead of restarting."
       },
       {
-        id: "matrix",
-        type: "script",
-        eyebrow: "Step 5",
+        id: "matrices",
+        kind: "script",
+        eyebrow: "Stage 5",
         title: "Build Matrices",
-        meta: "distance.matrix.py",
+        meta: "Driving-time matrices",
         script: "distance.matrix.py",
-        input: [
-          "Grouped Excel from stage 4.",
-          "Named cluster_group column.",
-          "Google key from .env or --distance-api-key."
-        ],
-        output: [
-          "One Excel matrix per group in the run folder.",
-          "Files are named 05_distance_matrix_group-<group>.xlsx."
-        ],
-        notes: [
-          "Builds address labels from Street_Name House_Number, City.",
-          "Geocodes unique labels, then calls Google Distance Matrix for driving minutes.",
-          "Writes 999 when coordinates or route elements are missing."
-        ],
-        note: "These matrix files feed the final delivery planner."
+        input: ["Grouped rows with cluster_group."],
+        output: ["05_distance_matrix_group-<group>.xlsx files."],
+        files: ["flow.py", "distance.matrix.py"],
+        note: "Builds labels as Street_Name House_Number, City. Mock mode can replace Google matrix calls."
       },
       {
         id: "deliveries",
-        type: "route",
-        eyebrow: "Step 6",
+        kind: "route",
+        eyebrow: "Stage 6",
         title: "Delivery Plan",
-        meta: "deliveries.py",
+        meta: "Final routes and reports",
         script: "deliveries.py",
-        input: [
-          "04_clustered_delivery_groups.xlsx.",
-          "All 05_distance_matrix_group-*.xlsx files.",
-          "01c_good_orders_original_format.xlsx when stage 1 was included."
-        ],
-        output: [
-          "06_delivery_plan.xlsx.",
-          "06_delivery_plan.html.",
-          "06_delivery_plan.log."
-        ],
-        notes: [
-          "Plans multi-driver routes across groups.",
-          "The HTML report shows step timing and route addresses.",
-          "When original order metadata exists, comments and IDs appear next to each route address."
-        ],
-        note: "This is the final output of the automated flow."
-      },
-      {
-        id: "eshtaol",
-        type: "optional",
-        eyebrow: "Optional",
-        title: "Closest To Eshtaol",
-        meta: "closesToEshtaol.py",
-        script: "closesToEshtaol.py",
-        input: [
-          "Excel with LAT, LNG, Street_Name, House_Number, and cluster_group."
-        ],
-        output: [
-          "Console output with the closest address and its cluster_group."
-        ],
-        notes: [
-          "Uses hard-coded warehouse coordinates 31.77927525, 35.0105885.",
-          "Calculates air distance with the haversine formula.",
-          "Does not write an output file."
-        ],
-        note: "Use after k-mean.py when you want to identify the group nearest to the warehouse."
-      },
-      {
-        id: "grouped-handoff",
-        type: "data",
-        eyebrow: "Branch",
-        title: "Grouped Excel",
-        meta: "output of k-mean.py",
-        script: "k-mean.py output",
-        input: [
-          "The grouped Excel file saved by k-mean.py."
-        ],
-        output: [
-          "Input for distance.matrix.py.",
-          "Optional input for closesToEshtaol.py."
-        ],
-        notes: [
-          "Contains the cluster_group column.",
-          "Keeps the geocoded and clustered stop data needed by later scripts."
-        ],
-        note: "The main route continues to distance.matrix.py; the Eshtaol helper can also inspect this file."
+        input: ["Grouped rows.", "Matrix files.", "Original order metadata when stage 1 was included."],
+        output: ["06_delivery_plan.xlsx", "06_delivery_plan.html", "06_delivery_plan.log"],
+        files: ["flow.py", "deliveries.py"],
+        note: "Produces the driver-facing route report. Comments and order IDs appear when stage 1 metadata exists."
       }
     ];
 
@@ -563,76 +182,51 @@
     const detailScript = document.getElementById("detail-script");
     const detailInput = document.getElementById("detail-input");
     const detailOutput = document.getElementById("detail-output");
-    const detailNotes = document.getElementById("detail-notes");
+    const detailFiles = document.getElementById("detail-files");
     const detailNote = document.getElementById("detail-note");
 
-    function makeList(target, items) {
+    function list(target, values) {
       target.replaceChildren();
-      items.forEach((item) => {
+      values.forEach((value) => {
         const li = document.createElement("li");
-        li.textContent = item;
+        li.textContent = value;
         target.appendChild(li);
       });
     }
 
-    function selectStage(stageId) {
-      const stage = stages.find((item) => item.id === stageId);
-      if (!stage) {
-        return;
-      }
-
+    function select(id) {
+      const stage = stages.find((item) => item.id === id);
+      if (!stage) return;
       document.querySelectorAll(".node").forEach((node) => {
-        node.setAttribute("aria-pressed", String(node.dataset.stage === stageId));
+        node.setAttribute("aria-pressed", String(node.dataset.stage === id));
       });
-
       detailTitle.textContent = stage.title;
       detailScript.textContent = stage.script;
-      makeList(detailInput, stage.input);
-      makeList(detailOutput, stage.output);
-      makeList(detailNotes, stage.notes);
+      list(detailInput, stage.input);
+      list(detailOutput, stage.output);
+      list(detailFiles, stage.files);
       detailNote.textContent = stage.note;
     }
 
-    function buildNode(stage, extraClass) {
+    stages.forEach((stage, index) => {
       const wrap = document.createElement("div");
-      wrap.className = `node-wrap ${extraClass || ""}`.trim();
-
+      wrap.className = `node-wrap ${index === stages.length - 1 ? "end" : ""}`;
       const button = document.createElement("button");
-      button.className = `node ${stage.type}`;
+      button.className = "node";
       button.type = "button";
       button.dataset.stage = stage.id;
+      button.dataset.kind = stage.kind;
       button.setAttribute("aria-pressed", "false");
-      button.addEventListener("click", () => selectStage(stage.id));
-
-      const top = document.createElement("span");
-      top.className = "eyebrow";
-      top.textContent = stage.eyebrow;
-
-      const title = document.createElement("span");
-      title.className = "node-title";
-      title.textContent = stage.title;
-
-      const meta = document.createElement("span");
-      meta.className = "node-meta";
-      meta.textContent = stage.meta;
-
-      button.append(top, title, meta);
+      button.addEventListener("click", () => select(stage.id));
+      button.innerHTML = `<span class="eyebrow"></span><span class="title"></span><span class="meta"></span>`;
+      button.querySelector(".eyebrow").textContent = stage.eyebrow;
+      button.querySelector(".title").textContent = stage.title;
+      button.querySelector(".meta").textContent = stage.meta;
       wrap.appendChild(button);
-      return wrap;
-    }
-
-    stages.slice(0, 8).forEach((stage, index) => {
-      const extraClass = index === 3 ? "break" : index === 7 ? "end" : "";
-      flow.appendChild(buildNode(stage, extraClass));
+      flow.appendChild(wrap);
     });
 
-    const optionalLane = document.createElement("div");
-    optionalLane.className = "optional-lane";
-    optionalLane.appendChild(buildNode(stages[9], "optional"));
-    optionalLane.appendChild(buildNode(stages[8], "end optional"));
-    flow.appendChild(optionalLane);
-
-    selectStage("cleanup");
+    select("cleanup");
   </script>
 </body>
 </html>

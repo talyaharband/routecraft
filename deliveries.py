@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 import math
@@ -5,6 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 import time
+import requests
 
 try:
     from bidi.algorithm import get_display
@@ -16,6 +18,68 @@ WAREHOUSE_LAT = 31.77927525
 WAREHOUSE_LNG = 35.0105885
 DELIVERY_TIME_MINUTES = 4
 MAX_SHIFT_MINUTES = 420  # 7 hours in minutes
+ORIGIN_DURATION_RECORDS = []
+ORIGIN_DURATION_OUTPUT_PATH = None
+ORIGIN_DURATION_CACHE = None
+
+
+def duration_cache_key(origin_lat, origin_lng, dest_lat, dest_lng, dest_name=""):
+    return (
+        round(float(origin_lat), 6) if not pd.isna(origin_lat) else "",
+        round(float(origin_lng), 6) if not pd.isna(origin_lng) else "",
+        round(float(dest_lat), 6) if not pd.isna(dest_lat) else "",
+        round(float(dest_lng), 6) if not pd.isna(dest_lng) else "",
+        str(dest_name),
+    )
+
+
+def load_origin_duration_cache():
+    global ORIGIN_DURATION_CACHE
+    if ORIGIN_DURATION_CACHE is not None:
+        return ORIGIN_DURATION_CACHE
+
+    cache_path = Path(__file__).resolve().parent / "addresses" / "mock_google_data" / "origin_duration_cache.xlsx"
+    cache = {}
+    if cache_path.exists():
+        df = pd.read_excel(cache_path).fillna("")
+        for _, row in df.iterrows():
+            try:
+                key = duration_cache_key(
+                    row.get("origin_lat"),
+                    row.get("origin_lng"),
+                    row.get("dest_lat"),
+                    row.get("dest_lng"),
+                    row.get("dest_name", ""),
+                )
+                cache[key] = float(row.get("minutes"))
+            except Exception:
+                continue
+    ORIGIN_DURATION_CACHE = cache
+    return cache
+
+
+def load_env_file(env_path):
+    env_file = Path(env_path)
+    if not env_file.exists():
+        return
+
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def get_distance_api_key(input_path=None):
+    load_env_file(Path(__file__).resolve().parent / ".env")
+    if input_path is not None:
+        load_env_file(Path(input_path).parent / ".env")
+    return (
+        os.getenv("DISTANCE_MATRIX_API_KEY")
+        or os.getenv("GOOGLE_MAPS_API_KEY")
+        or os.getenv("GEOCODING_API_KEY")
+    )
 
 
 def calculate_haversine(lat1, lon1, lat2, lon2):
@@ -124,34 +188,98 @@ def load_distance_matrix(cluster_group, matrix_folder):
         return None
 
 
-def add_origin_to_matrix_test(matrix_df, origin_lat, origin_lng, addresses_data):
-    """Add origin location as row 0 with sequential numbers (TEST MODE)"""
-    new_matrix = pd.DataFrame(index=["ORIGIN"] + list(matrix_df.index), 
-                             columns=["ORIGIN"] + list(matrix_df.columns))
-    
-    # Copy existing matrix to lower-right
+def get_drive_duration_minutes(origin_lat, origin_lng, dest_lat, dest_lng, api_key):
+    """Return Google driving duration in minutes between two coordinates."""
+    if not api_key:
+        raise RuntimeError("Missing Google Maps API key for delivery planning.")
+    if pd.isna(origin_lat) or pd.isna(origin_lng) or pd.isna(dest_lat) or pd.isna(dest_lng):
+        return 999
+
+    params = {
+        "origins": f"{origin_lat},{origin_lng}",
+        "destinations": f"{dest_lat},{dest_lng}",
+        "mode": "driving",
+        "departure_time": "now",
+        "key": api_key,
+    }
+
+    try:
+        response = requests.get(
+            "https://maps.googleapis.com/maps/api/distancematrix/json",
+            params=params,
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("status") != "OK":
+            print(f"Google Distance Matrix status: {data.get('status')}")
+            return 999
+        element = data["rows"][0]["elements"][0]
+        if element.get("status") != "OK":
+            print(f"Google route status: {element.get('status')}")
+            return 999
+        seconds = element.get("duration_in_traffic", element.get("duration", {})).get("value")
+        if seconds is None:
+            return 999
+        return round(seconds / 60)
+    except Exception as exc:
+        print(f"Google duration failed: {exc}")
+        return 999
+
+
+def add_origin_to_matrix(matrix_df, origin_lat, origin_lng, addresses_data, api_key=None, test_mode=True):
+    """Add current location as row 0, using mock times or Google durations."""
+    new_matrix = pd.DataFrame(
+        index=["ORIGIN"] + list(matrix_df.index),
+        columns=["ORIGIN"] + list(matrix_df.columns),
+    )
+
     new_matrix.iloc[1:, 1:] = matrix_df.values
-    
-    # Column 0: all 999 (never return to origin)
     new_matrix.iloc[:, 0] = 999
     new_matrix.loc["ORIGIN", "ORIGIN"] = 0
-    
-    # Row 0: SEQUENTIAL numbers (0, 1, 2, 3...) (TEST MODE)
-    print("🧪 Filling row 0 with sequential times (0, 1, 2...)...")
+
+    if test_mode:
+        print("🧪 Filling row 0 with sequential times (0, 1, 2...)...")
+    else:
+        print("🚗 Filling row 0 with Google driving durations from current location...")
+
     for i, addr in enumerate(matrix_df.columns, 1):
-        # The cell (ORIGIN, ORIGIN) is already 0. This loop fills 1, 2, 3...
-        new_matrix.loc["ORIGIN", addr] = i
-        time.sleep(0.01)
-    
-    # Convert to numeric
+        dest = addresses_data.get(addr, {})
+        dest_lat = dest.get("LAT")
+        dest_lng = dest.get("LNG")
+        cache_key = duration_cache_key(origin_lat, origin_lng, dest_lat, dest_lng, addr)
+        if test_mode:
+            cached_minutes = load_origin_duration_cache().get(cache_key)
+            new_matrix.loc["ORIGIN", addr] = cached_minutes if cached_minutes is not None else i
+            time.sleep(0.01)
+            continue
+
+        minutes = get_drive_duration_minutes(
+            origin_lat,
+            origin_lng,
+            dest_lat,
+            dest_lng,
+            api_key,
+        )
+        new_matrix.loc["ORIGIN", addr] = minutes
+        ORIGIN_DURATION_RECORDS.append(
+            {
+                "origin_lat": origin_lat,
+                "origin_lng": origin_lng,
+                "dest_lat": dest_lat,
+                "dest_lng": dest_lng,
+                "dest_name": addr,
+                "minutes": minutes,
+            }
+        )
+        time.sleep(0.02)
+
     new_matrix = new_matrix.apply(pd.to_numeric, errors='coerce')
-    
-    # 🚨 Enforce square matrix (removes phantom Excel columns/rows)
+
     if new_matrix.shape[0] != new_matrix.shape[1]:
         min_dim = min(new_matrix.shape[0], new_matrix.shape[1])
         new_matrix = new_matrix.iloc[:min_dim, :min_dim]
 
-    
     return new_matrix
 
 
@@ -432,9 +560,15 @@ def run_tsp_on_matrix(matrix_df):
     return best_route, best_cost
 
 
-def run_multi_cluster_tsp(kmeans_path, matrix_folder, output_path=None, test_mode=True):
+def run_multi_cluster_tsp(kmeans_path, matrix_folder, output_path=None, test_mode=True, api_key=None):
+    global ORIGIN_DURATION_RECORDS
+    ORIGIN_DURATION_RECORDS = []
     kmeans_path = Path(kmeans_path)
     matrix_folder = Path(matrix_folder)
+    if not test_mode and not api_key:
+        api_key = get_distance_api_key(kmeans_path)
+    if not test_mode and not api_key:
+        raise RuntimeError("Missing Google Maps API key for delivery planning.")
 
     # 1. Load data
     print("\n" + "="*60)
@@ -492,7 +626,8 @@ def run_multi_cluster_tsp(kmeans_path, matrix_folder, output_path=None, test_mod
 
     # 4. Start journey
     print("\n" + "="*60)
-    print("🚀 STARTING MULTI-VEHICLE TSP JOURNEY (TEST MODE - Sequential)")
+    mode_label = "TEST MODE - Sequential" if test_mode else "PRODUCTION MODE - Google durations"
+    print(f"🚀 STARTING MULTI-VEHICLE TSP JOURNEY ({mode_label})")
     print("="*60)
 
     completed_clusters = set()
@@ -502,7 +637,7 @@ def run_multi_cluster_tsp(kmeans_path, matrix_folder, output_path=None, test_mod
     
     total_clusters = len(df_addresses['cluster_group'].astype(str).unique())
     active_city = None
-    sequential_single_time = 1  # For single-address clusters
+    sequential_single_time = 1  # For single-address clusters in test mode
 
     while len(completed_clusters) < total_clusters:
         print(f"\n{'='*60}")
@@ -590,8 +725,39 @@ def run_multi_cluster_tsp(kmeans_path, matrix_folder, output_path=None, test_mod
                 sub_addresses = [s.strip() for s in str(detailed_str).split(',') if s.strip()]
                 if not sub_addresses: sub_addresses = [node_name]
                 
-                step_travel_time = sequential_single_time
-                sequential_single_time += 1
+                node_coords = cluster_lookup.get(node_name, {})
+                cache_key = duration_cache_key(
+                    current_lat,
+                    current_lng,
+                    node_coords.get('LAT'),
+                    node_coords.get('LNG'),
+                    node_name,
+                )
+                if test_mode:
+                    cached_minutes = load_origin_duration_cache().get(cache_key)
+                    if cached_minutes is not None:
+                        step_travel_time = cached_minutes
+                    else:
+                        step_travel_time = sequential_single_time
+                        sequential_single_time += 1
+                else:
+                    step_travel_time = get_drive_duration_minutes(
+                        current_lat,
+                        current_lng,
+                        node_coords.get('LAT'),
+                        node_coords.get('LNG'),
+                        api_key,
+                    )
+                    ORIGIN_DURATION_RECORDS.append(
+                        {
+                            "origin_lat": current_lat,
+                            "origin_lng": current_lng,
+                            "dest_lat": node_coords.get('LAT'),
+                            "dest_lng": node_coords.get('LNG'),
+                            "dest_name": node_name,
+                            "minutes": step_travel_time,
+                        }
+                    )
                 step_extra_travel = (len(sub_addresses) - 1) * 1
                 step_delivery_time = len(sub_addresses) * DELIVERY_TIME_MINUTES
                 total_step_time = step_travel_time + step_extra_travel + step_delivery_time
@@ -632,7 +798,14 @@ def run_multi_cluster_tsp(kmeans_path, matrix_folder, output_path=None, test_mod
                     
             else:
                 # TSP Logic
-                modified_matrix = add_origin_to_matrix_test(matrix_df, current_lat, current_lng, cluster_lookup)
+                modified_matrix = add_origin_to_matrix(
+                    matrix_df,
+                    current_lat,
+                    current_lng,
+                    cluster_lookup,
+                    api_key=api_key,
+                    test_mode=test_mode,
+                )
                 tsp_route, _ = run_tsp_on_matrix(modified_matrix)
                 
                 route_names_segment = [get_display(current_location_name)]
@@ -720,7 +893,8 @@ def run_multi_cluster_tsp(kmeans_path, matrix_folder, output_path=None, test_mod
 
     # 6. Print final results
     print("\n" + "="*60)
-    print("✅ ALL DELIVERIES COMPLETE (TEST MODE)")
+    completion_label = "TEST MODE" if test_mode else "PRODUCTION MODE"
+    print(f"✅ ALL DELIVERIES COMPLETE ({completion_label})")
     print("="*60)
     
     print(f"\n📊 SUMMARY:")
@@ -747,12 +921,16 @@ def run_multi_cluster_tsp(kmeans_path, matrix_folder, output_path=None, test_mod
 
     # 7. Export to Excel
     print("\n💾 Exporting to Excel...")
-    return export_journey_to_excel(
+    excel_path = export_journey_to_excel(
         all_drivers_results,
         df_addresses,
         test_mode=test_mode,
         output_path=output_path,
     )
+    if ORIGIN_DURATION_OUTPUT_PATH and ORIGIN_DURATION_RECORDS:
+        pd.DataFrame(ORIGIN_DURATION_RECORDS).to_excel(ORIGIN_DURATION_OUTPUT_PATH, index=False)
+        print(f"✅ Saved origin duration cache to: {ORIGIN_DURATION_OUTPUT_PATH}")
+    return excel_path
 
 
 def run_multi_cluster_tsp_test():

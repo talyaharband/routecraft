@@ -103,44 +103,55 @@ def sanitize_group_value(group_value):
 
 def build_matrix_for_addresses(full_addresses, coords_dict):
     matrix_data = []
+    destination_chunk_size = 25
 
     for i, origin in enumerate(full_addresses):
-        row_minutes = []
-        for j, dest in enumerate(full_addresses):
-            if i == j:
-                row_minutes.append(0)
-                continue
+        row_minutes = [999] * len(full_addresses)
+        row_minutes[i] = 0
 
-            if not coords_dict[origin] or not coords_dict[dest]:
-                row_minutes.append(999)
-                continue
+        origin_coords = coords_dict.get(origin)
+        if origin_coords:
+            for start in range(0, len(full_addresses), destination_chunk_size):
+                dest_addresses = full_addresses[start : start + destination_chunk_size]
+                destinations = []
+                dest_positions = []
+                for offset, dest in enumerate(dest_addresses):
+                    j = start + offset
+                    dest_coords = coords_dict.get(dest)
+                    if not dest_coords:
+                        continue
+                    destinations.append(f"{dest_coords['lat']},{dest_coords['lng']}")
+                    dest_positions.append(j)
 
-            dm_params = {
-                "origins": f"{coords_dict[origin]['lat']},{coords_dict[origin]['lng']}",
-                "destinations": f"{coords_dict[dest]['lat']},{coords_dict[dest]['lng']}",
-                "mode": "driving",
-                "departure_time": "now",
-                "key": API_KEY,
-            }
+                if not destinations:
+                    continue
 
-            try:
-                dm_res = requests.get(
-                    "https://maps.googleapis.com/maps/api/distancematrix/json",
-                    params=dm_params
-                ).json()
-                if dm_res["status"] == "OK":
-                    element = dm_res["rows"][0]["elements"][0]
-                    if element["status"] == "OK":
-                        seconds = element.get("duration_in_traffic", element["duration"])["value"]
-                        row_minutes.append(round(seconds / 60))
-                    else:
-                        row_minutes.append(999)
-                else:
-                    row_minutes.append(999)
-            except Exception:
-                row_minutes.append(999)
+                dm_params = {
+                    "origins": f"{origin_coords['lat']},{origin_coords['lng']}",
+                    "destinations": "|".join(destinations),
+                    "mode": "driving",
+                    "departure_time": "now",
+                    "key": API_KEY,
+                }
 
-            time.sleep(0.02)
+                try:
+                    dm_res = requests.get(
+                        "https://maps.googleapis.com/maps/api/distancematrix/json",
+                        params=dm_params,
+                        timeout=30,
+                    ).json()
+                    if dm_res["status"] == "OK":
+                        elements = dm_res["rows"][0]["elements"]
+                        for dest_index, element in zip(dest_positions, elements):
+                            if element["status"] == "OK":
+                                seconds = element.get("duration_in_traffic", element["duration"])["value"]
+                                row_minutes[dest_index] = round(seconds / 60)
+                            else:
+                                row_minutes[dest_index] = 999
+                except Exception:
+                    pass
+
+                time.sleep(0.02)
 
         print(f"Completed row {i + 1}/{len(full_addresses)}")
         matrix_data.append(row_minutes)

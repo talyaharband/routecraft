@@ -7,6 +7,7 @@ import html
 import importlib.util
 import importlib.machinery
 import io
+import json
 import os
 import re
 import sys
@@ -25,6 +26,8 @@ import requests
 
 ROOT = Path(__file__).resolve().parent
 RUNS_DIR = ROOT / "runs"
+MAX_GROUP_SIZE = 30
+MOCK_DATA_DIR = ROOT / "addresses" / "mock_google_data"
 
 
 @dataclass
@@ -76,6 +79,12 @@ def require_file(path: Path, label: str) -> Path:
     if not resolved.exists():
         raise FileNotFoundError(f"{label} does not exist: {resolved}")
     return resolved
+
+
+def sanitize_filename(value: str) -> str:
+    safe_value = re.sub(r'[<>:"/\\|?*]+', "_", value.strip())
+    safe_value = re.sub(r"\s+", "_", safe_value)
+    return safe_value or "unknown"
 
 
 def get_google_key(args: argparse.Namespace) -> str:
@@ -140,6 +149,79 @@ def mock_distance_matrix(full_addresses: list[str], coords_dict: dict[str, Any])
             row_minutes.append(max(1, round((meters / 500) + 3)))
         matrix_data.append(row_minutes)
     return pd.DataFrame(matrix_data, index=full_addresses, columns=full_addresses)
+
+
+def load_mock_geocode_cache() -> dict[tuple[str, str], dict[str, Any]]:
+    path = MOCK_DATA_DIR / "geocoding_cache.xlsx"
+    if not path.exists():
+        return {}
+    df = pd.read_excel(path).fillna("")
+    cache = {}
+    for _, row in df.iterrows():
+        cache[(str(row.get("query", "")), str(row.get("city", "")))] = row.to_dict()
+    return cache
+
+
+def load_mock_coords_cache() -> dict[str, dict[str, float]]:
+    path = MOCK_DATA_DIR / "distance_coords_cache.xlsx"
+    if not path.exists():
+        return {}
+    df = pd.read_excel(path).fillna("")
+    cache = {}
+    for _, row in df.iterrows():
+        address = str(row.get("address", "")).strip()
+        if not address:
+            continue
+        lat = pd.to_numeric(row.get("lat"), errors="coerce")
+        lng = pd.to_numeric(row.get("lng"), errors="coerce")
+        if pd.notna(lat) and pd.notna(lng):
+            cache[address] = {"lat": float(lat), "lng": float(lng)}
+    return cache
+
+
+def mock_coords_from_cache(address: str, _key: str = "") -> tuple[dict[str, float], str]:
+    cached = load_mock_coords_cache().get(address)
+    if cached:
+        return cached, "mock cache"
+    return mock_coords(address, _key)
+
+
+def mock_matrix_cache_path(group_value: Any) -> Path:
+    safe_group = re.sub(r'[<>:"/\\|?*]+', "_", str(group_value).strip())
+    safe_group = re.sub(r"\s+", "_", safe_group) or "unknown"
+    return MOCK_DATA_DIR / "distance_matrices" / f"05_distance_matrix_group-{safe_group}.xlsx"
+
+
+def save_real_mock_data(run_dir: Path) -> list[Path]:
+    MOCK_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[Path] = []
+
+    geocode_path = run_dir / "02_geocoding_cache.xlsx"
+    if geocode_path.exists():
+        path = MOCK_DATA_DIR / "geocoding_cache.xlsx"
+        pd.read_excel(geocode_path).to_excel(path, index=False)
+        saved_paths.append(path)
+
+    coords_path = run_dir / "05_distance_coords_cache.xlsx"
+    if coords_path.exists():
+        path = MOCK_DATA_DIR / "distance_coords_cache.xlsx"
+        pd.read_excel(coords_path).to_excel(path, index=False)
+        saved_paths.append(path)
+
+    matrix_dir = MOCK_DATA_DIR / "distance_matrices"
+    matrix_dir.mkdir(parents=True, exist_ok=True)
+    for matrix_path in sorted(run_dir.glob("05_distance_matrix_group-*.xlsx")):
+        target = matrix_dir / matrix_path.name
+        pd.read_excel(matrix_path, index_col=0).to_excel(target)
+        saved_paths.append(target)
+
+    origin_source = run_dir / "06_origin_duration_cache.xlsx"
+    if origin_source.exists():
+        origin_target = MOCK_DATA_DIR / "origin_duration_cache.xlsx"
+        pd.read_excel(origin_source).to_excel(origin_target, index=False)
+        saved_paths.append(origin_target)
+
+    return saved_paths
 
 
 def clean_cell(value: Any) -> str:
@@ -277,6 +359,7 @@ def stage_1_cleanup(input_path: Path, run_dir: Path, args: argparse.Namespace) -
 
 def stage_2_geocode(input_path: Path, run_dir: Path, args: argparse.Namespace) -> tuple[Path, StageResult]:
     google_key = "" if args.mock_google else get_google_key(args)
+    geocode_cache = load_mock_geocode_cache() if args.mock_google else {}
     df = pd.read_excel(input_path)
     if df.shape[1] < 3:
         raise RuntimeError("Stage 2 input must have at least 3 columns: city, street, house number.")
@@ -284,17 +367,38 @@ def stage_2_geocode(input_path: Path, run_dir: Path, args: argparse.Namespace) -
     city_col, street_col, number_col = df.columns[:3]
     rows = []
     failed_rows = []
+    geocode_cache_rows = []
     for _, row in df.iterrows():
         city = clean_cell(row[city_col])
         street = clean_cell(row[street_col])
         house_number = clean_cell(row[number_col])
         query = f"{street} {house_number}, {city}".strip()
         if args.mock_google:
-            lat, lng = mock_lat_lng(query)
-            is_precise = True
-            status = "mock precise match"
+            cached = geocode_cache.get((query, city))
+            if cached:
+                lat = cached.get("lat")
+                lng = cached.get("lng")
+                is_precise = bool(cached.get("is_precise", True))
+                status = str(cached.get("status", "mock cached precise match"))
+            else:
+                lat, lng = mock_lat_lng(query)
+                is_precise = True
+                status = "mock precise match"
         else:
             lat, lng, is_precise, status = geocode_precise_address(query, google_key, city)
+
+        geocode_cache_rows.append(
+            {
+                "query": query,
+                "city": city,
+                "street": street,
+                "house_number": house_number,
+                "lat": lat,
+                "lng": lng,
+                "is_precise": is_precise,
+                "status": status,
+            }
+        )
 
         if not is_precise:
             failed_rows.append(
@@ -325,8 +429,10 @@ def stage_2_geocode(input_path: Path, run_dir: Path, args: argparse.Namespace) -
         raise RuntimeError("Stage 2 did not find any addresses with precise Google geocoding matches.")
 
     pd.DataFrame(rows).to_excel(output_path, index=False)
+    if geocode_cache_rows:
+        pd.DataFrame(geocode_cache_rows).to_excel(run_dir / "02_geocoding_cache.xlsx", index=False)
     failure_path = record_geocode_failures(run_dir, failed_rows)
-    output_files = [output_path] + ([failure_path] if failure_path else [])
+    output_files = [output_path, run_dir / "02_geocoding_cache.xlsx"] + ([failure_path] if failure_path else [])
     notes = []
     if failed_rows:
         notes.append(
@@ -389,45 +495,72 @@ def stage_4_group(input_path: Path, run_dir: Path, args: argparse.Namespace) -> 
         raise RuntimeError(f"Stage 4 input is missing columns: {', '.join(sorted(missing))}")
 
     from k_means_constrained import KMeansConstrained
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
     df["cluster_group"] = pd.NA
-    next_group = 0
+    global_cluster_id = 0
+    total_clusters = 0
     notes = []
-    for city, city_df in df.groupby("City", sort=False):
+    for city, city_df in df.groupby("City"):
         city_indices = city_df.index
         coords = city_df[["LAT", "LNG"]].values
         num_addresses = len(city_df)
-        if num_addresses <= args.max_group_size:
-            df.loc[city_indices, "cluster_group"] = next_group
-            notes.append(f"{city}: {num_addresses} rows fit in group {next_group}.")
-            next_group += 1
+        if num_addresses <= MAX_GROUP_SIZE:
+            df.loc[city_indices, "cluster_group"] = global_cluster_id
+            notes.append(f"{city}: {num_addresses} rows fit in group {global_cluster_id}.")
+            global_cluster_id += 1
+            total_clusters += 1
             continue
 
-        n_clusters = int(np.ceil(num_addresses / args.max_group_size))
+        n_clusters = int(np.ceil(num_addresses / MAX_GROUP_SIZE))
         clf = KMeansConstrained(
             n_clusters=n_clusters,
             size_min=1,
-            size_max=args.max_group_size,
+            size_max=MAX_GROUP_SIZE,
+            n_init=50,
+            max_iter=500,
             random_state=42,
         )
         local_labels = clf.fit_predict(coords)
-        label_map = {label: next_group + offset for offset, label in enumerate(sorted(set(local_labels)))}
-        df.loc[city_indices, "cluster_group"] = [label_map[label] for label in local_labels]
-        notes.append(f"{city}: created groups {next_group}-{next_group + n_clusters - 1}.")
-        next_group += n_clusters
+        df.loc[city_indices, "cluster_group"] = local_labels + global_cluster_id
+        notes.append(f"{city}: created groups {global_cluster_id}-{global_cluster_id + n_clusters - 1}.")
+        global_cluster_id += n_clusters
+        total_clusters += n_clusters
 
     df["cluster_group"] = df["cluster_group"].astype(int)
 
     output_path = run_dir / "04_clustered_delivery_groups.xlsx"
     df.to_excel(output_path, index=False)
-    return output_path, StageResult(4, "Create delivery groups", "completed", [output_path], notes)
+
+    map_paths = []
+    for city, city_df in df.groupby("City"):
+        city_coords = city_df[["LAT", "LNG"]].values
+        city_clusters = city_df["cluster_group"]
+        fig, ax = plt.subplots(figsize=(10, 7))
+        scatter = ax.scatter(city_coords[:, 1], city_coords[:, 0], c=city_clusters, cmap="viridis", s=50)
+        ax.set_title(f"Delivery Clusters - {city} ({city_clusters.nunique()} Groups)", fontsize=14)
+        ax.set_xlabel("Longitude (LNG)")
+        ax.set_ylabel("Latitude (LAT)")
+        ax.grid(True, linestyle="--", alpha=0.6)
+        fig.colorbar(scatter, ax=ax, label="Global Group Number")
+        fig.tight_layout()
+        map_path = run_dir / f"04_cluster_map_{sanitize_filename(str(city))}.png"
+        fig.savefig(map_path, dpi=160)
+        plt.close(fig)
+        map_paths.append(map_path)
+
+    notes.append(f"Created {total_clusters} groups across all cities.")
+    return output_path, StageResult(4, "Create delivery groups", "completed", [output_path, *map_paths], notes)
 
 
 def stage_5_distance_matrices(input_path: Path, run_dir: Path, args: argparse.Namespace) -> tuple[list[Path], StageResult]:
     distance = import_script(ROOT / "distance.matrix.py", "routecraft_distance_matrix")
     if args.mock_google:
         distance.API_KEY = "mock-google"
-        distance.get_coords = mock_coords
+        distance.get_coords = mock_coords_from_cache
         distance.build_matrix_for_addresses = mock_distance_matrix
     else:
         distance.API_KEY = get_distance_key(args)
@@ -451,25 +584,51 @@ def stage_5_distance_matrices(input_path: Path, run_dir: Path, args: argparse.Na
     unique_addresses = list(dict.fromkeys(all_addresses))
 
     coords_dict = {}
+    coords_rows = []
     for address in unique_addresses:
         coords, _status = distance.get_coords(address, distance.API_KEY)
         coords_dict[address] = coords
+        coords_rows.append(
+            {
+                "address": address,
+                "lat": coords.get("lat") if coords else None,
+                "lng": coords.get("lng") if coords else None,
+                "status": _status,
+            }
+        )
+
+    coords_cache_path = run_dir / "05_distance_coords_cache.xlsx"
+    pd.DataFrame(coords_rows).to_excel(coords_cache_path, index=False)
 
     matrix_paths = []
     for group_value, group_df in grouped_frames.items():
         full_addresses = distance.build_full_addresses(group_df)
-        matrix_df = distance.build_matrix_for_addresses(full_addresses, coords_dict)
         safe_group = distance.sanitize_group_value(group_value)
         matrix_path = run_dir / f"05_distance_matrix_group-{safe_group}.xlsx"
+        cached_matrix_path = mock_matrix_cache_path(group_value)
+        if args.mock_google and cached_matrix_path.exists():
+            matrix_df = pd.read_excel(cached_matrix_path, index_col=0)
+            matrix_df = matrix_df.reindex(index=full_addresses, columns=full_addresses)
+            if matrix_df.isna().any().any():
+                matrix_df = distance.build_matrix_for_addresses(full_addresses, coords_dict)
+        else:
+            matrix_df = distance.build_matrix_for_addresses(full_addresses, coords_dict)
         matrix_df.to_excel(matrix_path)
         matrix_paths.append(matrix_path)
 
-    return matrix_paths, StageResult(5, "Build distance matrices", "completed", matrix_paths)
+    return matrix_paths, StageResult(5, "Build distance matrices", "completed", [coords_cache_path, *matrix_paths])
 
 
-def stage_6_delivery_plan(input_path: Path, matrix_folder: Path, run_dir: Path) -> tuple[Path, StageResult]:
+def stage_6_delivery_plan(
+    input_path: Path,
+    matrix_folder: Path,
+    run_dir: Path,
+    args: argparse.Namespace,
+) -> tuple[Path, StageResult]:
     deliveries = import_script(ROOT / "deliveries.py", "routecraft_deliveries")
     output_path = run_dir / "06_delivery_plan.xlsx"
+    deliveries.ORIGIN_DURATION_OUTPUT_PATH = run_dir / "06_origin_duration_cache.xlsx"
+    api_key = None if args.mock_google else get_distance_key(args)
     stdout = io.StringIO()
     stderr = io.StringIO()
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -477,18 +636,23 @@ def stage_6_delivery_plan(input_path: Path, matrix_folder: Path, run_dir: Path) 
             kmeans_path=input_path,
             matrix_folder=matrix_folder,
             output_path=output_path,
-            test_mode=True,
+            test_mode=args.mock_google,
+            api_key=api_key,
         )
     log_path = run_dir / "06_delivery_plan.log"
     log_path.write_text(stdout.getvalue(), encoding="utf-8")
     if stderr.getvalue():
         (run_dir / "06_delivery_plan.err.log").write_text(stderr.getvalue(), encoding="utf-8")
     html_path = render_delivery_plan_html(output_path, run_dir / "06_delivery_plan.html")
+    output_files = [output_path, html_path, log_path]
+    origin_cache_path = run_dir / "06_origin_duration_cache.xlsx"
+    if origin_cache_path.exists():
+        output_files.append(origin_cache_path)
     return output_path, StageResult(
         6,
         "Plan multi-driver deliveries",
         "completed",
-        [output_path, html_path, log_path],
+        output_files,
     )
 
 
@@ -857,11 +1021,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mock-google",
         action="store_true",
-        help="Use deterministic local mocks for stage 2 geocoding and stage 5 distance matrices.",
+        help="Use deterministic local mocks for Google geocoding, distance matrices, and delivery origin travel times.",
     )
     parser.add_argument("--max-workers", type=int, default=10)
     parser.add_argument("--cluster-threshold-meters", type=float, default=150)
-    parser.add_argument("--max-group-size", type=int, default=30)
     return parser.parse_args()
 
 
@@ -869,6 +1032,7 @@ def main() -> int:
     args = parse_args()
     input_path = require_file(Path(args.input), "Input file")
     load_env_file(ROOT / ".env")
+    load_env_file(ROOT / "addresses" / ".env")
     load_env_file(input_path.parent / ".env")
     run_dir = make_run_dir(Path(args.runs_dir).resolve())
     stage_results: list[StageResult] = []
@@ -898,8 +1062,21 @@ def main() -> int:
         if args.start_stage <= 6:
             if delivery_input_path is None:
                 delivery_input_path = Path(current)
-            current, result = stage_6_delivery_plan(delivery_input_path, matrix_folder, run_dir)
+            current, result = stage_6_delivery_plan(delivery_input_path, matrix_folder, run_dir, args)
             stage_results.append(result)
+
+        if not args.mock_google:
+            saved_mock_paths = save_real_mock_data(run_dir)
+            if saved_mock_paths:
+                stage_results.append(
+                    StageResult(
+                        7,
+                        "Refresh mock Google data",
+                        "completed",
+                        saved_mock_paths,
+                        ["Saved real Google results for future --mock-google test runs."],
+                    )
+                )
 
         print(f"Flow completed. Run folder: {run_dir}")
         print(f"Final report: {current}")
