@@ -1,0 +1,20 @@
+{
+  "drivers": 3,
+  "max_packages_per_driver": 60,
+  "ideal_shift_minutes": 420,
+  "max_shift_minutes": 720,
+  "service_minutes_per_package": 4,
+  "ortools_time_limit_seconds": 60,
+  "shift_start_time": "08:00",
+  "priority_column": "priority",
+  "arrival_deadline_column": "required_delivery_date",
+  "prioritized_arrival_time": null,
+  "planning_date": "today",
+  "due_today_hard": true,
+  "overdue_penalty": 2000000,
+  "due_today_penalty": 1500000,
+  "due_tomorrow_penalty": 300000,
+  "future_due_penalty": 75000,
+  "no_due_date_penalty": 25000,
+  "require_all_deliveries": false
+}
