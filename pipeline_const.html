@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Routecraft Constraints Pipeline</title></head>
+<body>
+  <main>
+    <h1>Routecraft Constraints Pipeline</h1>
+    <p>Constraint-first variant for <code>const.py</code>, configured by <code>constraints_parameters_const.json</code>.</p>
+    <ol>
+      <li>Clean raw order/address data and preserve due dates</li>
+      <li>Geocode and assign priority from <code>required_delivery_date</code></li>
+      <li>Select only the loadable orders for the current work arrangement</li>
+      <li>Cluster nearby selected orders</li>
+      <li>Create k-means groups and maps</li>
+      <li>Build per-group distance matrices</li>
+      <li>Plan each driver sequentially, including warehouse reload segments when useful</li>
+      <li>Save leftovers for the next run</li>
+    </ol>
+    <p><a href="PIPELINE_CONST.md">Markdown pipeline</a></p>
+  </main>
+</body>
+</html>

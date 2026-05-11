@@ -1,13 +1,12 @@
-# Routecraft Pipeline
+# Routecraft Pipeline Index
 
-Routecraft now runs through `flow.py`. The old standalone scripts can remain in the repository, but the automated flow uses only these code files:
+Routecraft now has three main pipeline entry points. Each has its own matching pipeline notes:
 
-- `flow.py`
-- `data.cleanup.py`
-- `distance.matrix.py`
-- `deliveries.py`
+- Original flow: `flow.py`, [PIPELINE_FLOW.md](PIPELINE_FLOW.md), [pipeline_flow.html](pipeline_flow.html)
+- OR-Tools flow: `ortools.py`, [PIPELINE_ORTOOLS.md](PIPELINE_ORTOOLS.md), [pipeline_ortools.html](pipeline_ortools.html)
+- Constraints flow: `const.py`, [PIPELINE_CONST.md](PIPELINE_CONST.md), [pipeline_const.html](pipeline_const.html)
 
-For a clickable visual version, open [pipeline.html](pipeline.html).
+The old clickable visual remains at [pipeline.html](pipeline.html) for the original `flow.py` view.
 
 ## Flow At A Glance
 

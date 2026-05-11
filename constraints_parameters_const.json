@@ -1,0 +1,12 @@
+{
+  "drivers": 2,
+  "max_packages_per_driver": 30,
+  "ideal_shift_minutes": 420,
+  "max_shift_minutes": 720,
+  "service_minutes_per_package": 4,
+  "close_building_distance_meters": 150,
+  "due_date_column": "required_delivery_date",
+  "planning_date": "today",
+  "overdue_priority": 0,
+  "no_due_date_priority": 999999
+}
