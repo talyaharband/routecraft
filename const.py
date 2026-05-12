@@ -466,7 +466,9 @@ def delivery_priority_for_date(due_date: pd.Timestamp | None, args: argparse.Nam
     days_until_due = int((due_date - planning_date).days)
     if days_until_due < 0:
         return int(constraint_value(args, "overdue_priority", 0))
-    return days_until_due + 1
+    if days_until_due == 0:
+        return 1
+    return 2
 
 
 def delivery_priority(value: Any, args: argparse.Namespace) -> int:
@@ -475,6 +477,12 @@ def delivery_priority(value: Any, args: argparse.Namespace) -> int:
 
 def package_count_from_row(row: pd.Series) -> int:
     value = pd.to_numeric(row.get("total_orders_in_cluster", ""), errors="coerce")
+    if pd.notna(value) and int(value) > 0:
+        return int(value)
+    value = pd.to_numeric(row.get("source_order_count", ""), errors="coerce")
+    if pd.notna(value) and int(value) > 0:
+        return int(value)
+    value = pd.to_numeric(row.get("package_count", ""), errors="coerce")
     if pd.notna(value) and int(value) > 0:
         return int(value)
     return 1
@@ -970,10 +978,85 @@ def add_current_origin_matrix(
     return out
 
 
+def cluster_key_for_row(row: pd.Series) -> tuple[str, str]:
+    return (clean_cell(row.get("_matrix_folder", "")), clean_cell(row.get("cluster_group", "")))
+
+
+def cluster_key_mask(df: pd.DataFrame, key: tuple[str, str]) -> pd.Series:
+    return (
+        df["_matrix_folder"].astype(str).map(clean_cell).eq(key[0])
+        & df["cluster_group"].astype(str).map(clean_cell).eq(key[1])
+    )
+
+
+def closest_next_row(
+    remaining: pd.DataFrame,
+    current_lat: Any,
+    current_lng: Any,
+    active_city: Any,
+    pending_cluster_key: tuple[str, str] | None,
+) -> tuple[pd.Series | None, Any, tuple[str, str] | None]:
+    if remaining.empty:
+        return None, active_city, pending_cluster_key
+    if pending_cluster_key is not None:
+        pending_rows = remaining[cluster_key_mask(remaining, pending_cluster_key)]
+        if not pending_rows.empty:
+            row = pending_rows.iloc[0]
+            return row, row.get("City", active_city), pending_cluster_key
+        pending_cluster_key = None
+
+    candidates = remaining.copy()
+    candidates["_air_distance"] = candidates.apply(
+        lambda row: calculate_haversine(current_lat, current_lng, row.get("LAT"), row.get("LNG")),
+        axis=1,
+    )
+    if active_city not in (None, "") and "City" in candidates.columns:
+        city_candidates = candidates[candidates["City"].astype(str).eq(str(active_city))]
+        if not city_candidates.empty:
+            row = city_candidates.sort_values("_air_distance", kind="stable").iloc[0]
+            return row, active_city, None
+    row = candidates.sort_values("_air_distance", kind="stable").iloc[0]
+    return row, row.get("City", None), None
+
+
+def remaining_city_has_rows(remaining: pd.DataFrame, city: Any) -> bool:
+    if remaining.empty or city in (None, "") or "City" not in remaining.columns:
+        return False
+    return bool(remaining["City"].astype(str).eq(str(city)).any())
+
+
+def tsp_route_for_rows(
+    deliveries: Any,
+    matrix_folder: Path,
+    group_value: Any,
+    group_rows: pd.DataFrame,
+    current_lat: Any,
+    current_lng: Any,
+    args: argparse.Namespace,
+    api_key: str | None,
+) -> tuple[list[int], pd.DataFrame, str]:
+    matrix_df = load_group_matrix(matrix_folder, group_value)
+    modified_matrix = add_current_origin_matrix(
+        matrix_df,
+        group_rows,
+        current_lat,
+        current_lng,
+        args,
+        api_key,
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        tsp_route, _ = deliveries.run_tsp_on_matrix(modified_matrix)
+    return tsp_route, modified_matrix, stdout.getvalue() + stderr.getvalue()
+
+
 def choose_load_rows(remaining: pd.DataFrame, max_packages: int) -> pd.DataFrame:
     load_indices = []
     load_packages = 0
-    for idx, row in remaining.sort_values(by=["delivery_priority", "City", "cluster_group"], kind="stable").iterrows():
+    sort_columns = [col for col in ["_matrix_folder", "cluster_group", "City"] if col in remaining.columns]
+    ordered = remaining.sort_values(by=sort_columns, kind="stable") if sort_columns else remaining
+    for idx, row in ordered.iterrows():
         packages = package_count_from_row(row)
         if packages > max_packages and not load_indices:
             break
@@ -1083,6 +1166,27 @@ def stage_6_delivery_plan(
     all_driver_results: dict[int, dict[str, Any]] = {}
     log_lines = []
     extra_output_files: list[Path] = []
+    pending_cluster_key: tuple[str, str] | None = None
+    active_city: Any = None
+
+    log_lines.extend(
+        [
+            "=" * 60,
+            "LOADING DATA",
+            "=" * 60,
+            f"Loaded {len(df)} selected rows for constrained delivery planning",
+            f"Drivers: {drivers}",
+            f"Capacity per driver load: {max_packages}",
+            f"Ideal shift minutes: {ideal_shift:.0f}",
+            f"Max shift minutes: {max_shift:.0f}",
+            "",
+            "=" * 60,
+            "STARTING MULTI-VEHICLE TSP JOURNEY (CONSTRAINT PRODUCTION)"
+            if not args.mock_google
+            else "STARTING MULTI-VEHICLE TSP JOURNEY (CONSTRAINT MOCK)",
+            "=" * 60,
+        ]
+    )
 
     for driver_id in range(1, drivers + 1):
         driver_time = 0.0
@@ -1092,6 +1196,16 @@ def stage_6_delivery_plan(
         current_lng = WAREHOUSE_LNG
         current_name = WAREHOUSE_NAME
         load_number = 1
+        load_packages = 0
+
+        log_lines.extend(
+            [
+                "",
+                "=" * 60,
+                f"STARTING SHIFT FOR DRIVER {driver_id}",
+                "=" * 60,
+            ]
+        )
 
         while driver_time < max_shift:
             if remaining.empty:
@@ -1113,109 +1227,180 @@ def stage_6_delivery_plan(
                 log_lines.append(
                     f"Driver {driver_id} pulled {len(deferred_batch)} deferred orders for load {load_number}."
                 )
-            load_rows = choose_load_rows(remaining, max_packages)
-            if load_rows.empty:
-                break
-            delivered_this_load: list[int] = []
-            load_started = False
 
-            for (folder_value, group_value), group_rows in load_rows.groupby(["_matrix_folder", "cluster_group"], sort=False):
-                group_rows = group_rows.copy()
-                matrix_df = load_group_matrix(Path(folder_value), group_value)
-                active_rows = group_rows[~group_rows["_route_id"].isin(delivered_this_load)]
-                if active_rows.empty:
-                    continue
-                modified_matrix = add_current_origin_matrix(
-                    matrix_df,
-                    active_rows,
+            if load_packages >= max_packages:
+                return_to_warehouse = drive_duration_minutes(
                     current_lat,
                     current_lng,
+                    WAREHOUSE_LAT,
+                    WAREHOUSE_LNG,
                     args,
                     api_key,
                 )
-                stdout = io.StringIO()
-                stderr = io.StringIO()
-                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                    tsp_route, _ = deliveries.run_tsp_on_matrix(modified_matrix)
-                if stdout.getvalue():
-                    log_lines.append(stdout.getvalue())
-                if stderr.getvalue():
-                    log_lines.append(stderr.getvalue())
+                if driver_time >= ideal_shift or driver_time + return_to_warehouse >= max_shift:
+                    break
+                driver_time += return_to_warehouse
+                journey.append(
+                    {
+                        "load": load_number,
+                        "cluster": "RELOAD",
+                        "city": "Warehouse",
+                        "route_str": f"{current_name} → {WAREHOUSE_NAME}",
+                        "travel_time": return_to_warehouse,
+                        "delivery_time": 0,
+                        "cost": return_to_warehouse,
+                        "endpoint": WAREHOUSE_NAME,
+                        "packages": 0,
+                        "segment_type": "reload",
+                    }
+                )
+                log_lines.append(
+                    f"Driver {driver_id} returning to Eshtaol to reload: {return_to_warehouse:.2f} min."
+                )
+                current_lat = WAREHOUSE_LAT
+                current_lng = WAREHOUSE_LNG
+                current_name = WAREHOUSE_NAME
+                load_number += 1
+                load_packages = 0
 
-                prev_idx = tsp_route[0]
-                route_names = [current_name]
-                travel_time = 0.0
-                delivery_time = 0.0
-                segment_rows = []
-                for curr_idx in tsp_route[1:]:
-                    label = modified_matrix.columns[curr_idx]
-                    match = active_rows[active_rows.apply(lambda row: matrix_label(row) == label, axis=1)]
-                    if match.empty:
-                        prev_idx = curr_idx
-                        continue
-                    row = match.iloc[0]
-                    packages = package_count_from_row(row)
-                    step_travel = float(modified_matrix.iloc[prev_idx, curr_idx])
-                    step_delivery = packages * service_minutes
-                    if driver_time + travel_time + delivery_time + step_travel + step_delivery > max_shift:
-                        break
-                    travel_time += step_travel
-                    delivery_time += step_delivery
-                    route_names.extend(route_parts_for_row(row))
-                    segment_rows.append(row)
-                    delivered_this_load.append(int(row["_route_id"]))
-                    current_lat = row.get("LAT")
-                    current_lng = row.get("LNG")
-                    current_name = route_parts_for_row(row)[-1] if route_parts_for_row(row) else label
+            closest, active_city, pending_cluster_key = closest_next_row(
+                remaining,
+                current_lat,
+                current_lng,
+                active_city,
+                pending_cluster_key,
+            )
+            if closest is None:
+                break
+
+            folder_value, group_value = cluster_key_for_row(closest)
+            group_rows = remaining[cluster_key_mask(remaining, (folder_value, group_value))].copy()
+            if group_rows.empty:
+                pending_cluster_key = None
+                continue
+
+            log_lines.append("")
+            log_lines.append(
+                f"Next Target: {matrix_label(closest)} | City: {active_city or 'None'} | "
+                f"Cluster: {group_value} | Load {load_number} packages: {load_packages}/{max_packages} | "
+                f"Time: {driver_time:.2f}/{max_shift:.0f} min"
+            )
+
+            tsp_route, modified_matrix, tsp_log = tsp_route_for_rows(
+                deliveries,
+                Path(folder_value),
+                group_value,
+                group_rows,
+                current_lat,
+                current_lng,
+                args,
+                api_key,
+            )
+            if tsp_log:
+                log_lines.append(tsp_log)
+
+            prev_idx = tsp_route[0]
+            route_names = [current_name]
+            travel_time = 0.0
+            delivery_time = 0.0
+            segment_rows: list[pd.Series] = []
+            delivered_ids: list[int] = []
+            stop_reason = ""
+
+            for curr_idx in tsp_route[1:]:
+                label = modified_matrix.columns[curr_idx]
+                match = group_rows[group_rows.apply(lambda row: matrix_label(row) == label, axis=1)]
+                match = match[~match["_route_id"].isin(delivered_ids)]
+                if match.empty:
                     prev_idx = curr_idx
-                    load_started = True
+                    continue
+                row = match.iloc[0]
+                packages = package_count_from_row(row)
+                step_travel = float(modified_matrix.iloc[prev_idx, curr_idx])
+                step_delivery = packages * service_minutes
+                total_step = step_travel + step_delivery
+                if load_packages + packages > max_packages:
+                    if load_packages == 0 and packages > max_packages:
+                        log_lines.append(
+                            f"Warning: {matrix_label(row)} has {packages} packages, above load capacity {max_packages}. "
+                            "Delivering it to avoid getting stuck."
+                        )
+                    else:
+                        stop_reason = "capacity"
+                        pending_cluster_key = (folder_value, group_value)
+                        break
+                if driver_time + travel_time + delivery_time + total_step > max_shift:
+                    if not segment_rows and driver_time == 0:
+                        log_lines.append(
+                            f"Warning: {matrix_label(row)} exceeds max shift alone. Delivering it to avoid getting stuck."
+                        )
+                    else:
+                        stop_reason = "max_shift"
+                        pending_cluster_key = (folder_value, group_value)
+                        break
 
-                if segment_rows:
-                    driver_time += travel_time + delivery_time
-                    driver_packages += sum(package_count_from_row(row) for row in segment_rows)
-                    journey.append(
-                        {
-                            "load": load_number,
-                            "cluster": group_value,
-                            "city": segment_rows[-1].get("City", ""),
-                            "route_str": " → ".join(route_names),
-                            "travel_time": travel_time,
-                            "delivery_time": delivery_time,
-                            "cost": travel_time + delivery_time,
-                            "endpoint": current_name,
-                            "packages": sum(package_count_from_row(row) for row in segment_rows),
-                            "segment_type": "delivery",
-                        }
-                    )
+                travel_time += step_travel
+                delivery_time += step_delivery
+                route_parts = route_parts_for_row(row)
+                route_names.extend(route_parts)
+                segment_rows.append(row)
+                delivered_ids.append(int(row["_route_id"]))
+                driver_packages += packages
+                load_packages += packages
+                current_lat = row.get("LAT")
+                current_lng = row.get("LNG")
+                current_name = route_parts[-1] if route_parts else label
+                prev_idx = curr_idx
 
-            if delivered_this_load:
-                remaining = remaining[~remaining["_route_id"].isin(delivered_this_load)].copy()
-            if not load_started:
+            if not segment_rows:
+                if stop_reason == "capacity" and load_packages > 0:
+                    load_packages = max_packages
+                    continue
                 break
-            if remaining.empty and (driver_time >= ideal_shift or deferred_pool.empty):
-                break
-            return_to_warehouse = drive_duration_minutes(current_lat, current_lng, WAREHOUSE_LAT, WAREHOUSE_LNG, args, api_key)
-            if driver_time + return_to_warehouse >= max_shift:
-                break
-            driver_time += return_to_warehouse
+
+            driver_time += travel_time + delivery_time
             journey.append(
                 {
                     "load": load_number,
-                    "cluster": "RELOAD",
-                    "city": "Warehouse",
-                    "route_str": f"{current_name} → {WAREHOUSE_NAME}",
-                    "travel_time": return_to_warehouse,
-                    "delivery_time": 0,
-                    "cost": return_to_warehouse,
-                    "endpoint": WAREHOUSE_NAME,
-                    "packages": 0,
-                    "segment_type": "reload",
+                    "cluster": group_value,
+                    "city": segment_rows[-1].get("City", ""),
+                    "route_str": " → ".join(route_names),
+                    "travel_time": travel_time,
+                    "delivery_time": delivery_time,
+                    "cost": travel_time + delivery_time,
+                    "endpoint": current_name,
+                    "packages": sum(package_count_from_row(row) for row in segment_rows),
+                    "segment_type": "delivery",
                 }
             )
-            current_lat = WAREHOUSE_LAT
-            current_lng = WAREHOUSE_LNG
-            current_name = WAREHOUSE_NAME
-            load_number += 1
+            remaining = remaining[~remaining["_route_id"].isin(delivered_ids)].copy()
+            log_lines.append(f"Route: {' → '.join(route_names)}")
+            log_lines.append(
+                f"Travel: {travel_time:.2f} min | Delivery: {delivery_time:.2f} min | "
+                f"Shift time: {driver_time:.2f} min | Load packages: {load_packages}/{max_packages}"
+            )
+
+            if not remaining[cluster_key_mask(remaining, (folder_value, group_value))].empty:
+                pending_cluster_key = (folder_value, group_value)
+            else:
+                pending_cluster_key = None
+                if not remaining_city_has_rows(remaining, active_city):
+                    log_lines.append(f"City '{active_city}' is complete. Searching globally for next city.")
+                    active_city = None
+
+            if stop_reason == "max_shift":
+                log_lines.append(
+                    f"Driver {driver_id} reached max shift limit. Cluster {group_value} will continue with the next driver."
+                )
+                break
+            if stop_reason == "capacity":
+                load_packages = max_packages
+
+            if driver_time >= ideal_shift:
+                log_lines.append(
+                    f"Driver {driver_id} reached/passed ideal shift ({driver_time:.2f} >= {ideal_shift:.0f}). Ending shift."
+                )
+                break
 
         all_driver_results[driver_id] = {
             "journey": journey,
@@ -1223,6 +1408,16 @@ def stage_6_delivery_plan(
             "addresses": driver_packages,
             "shift_type": "Regular" if driver_time <= ideal_shift else "Long",
         }
+        log_lines.extend(
+            [
+                "",
+                f"SHIFT COMPLETE - DRIVER {driver_id}",
+                f"Time worked: {driver_time:.2f} mins ({driver_time / 60:.2f} hours)",
+                f"Addresses delivered: {driver_packages}",
+            ]
+        )
+        if remaining.empty and deferred_pool.empty:
+            break
 
     leftover_path = run_dir / "06_leftover_orders_next_run.xlsx"
     leftover = pd.concat(
@@ -1290,6 +1485,27 @@ def stage_6_delivery_plan(
         ).to_excel(writer, sheet_name="Run Constraints", index=False)
 
     log_path = run_dir / "06_delivery_plan.log"
+    mode_label = "CONSTRAINT MOCK" if args.mock_google else "CONSTRAINT PRODUCTION"
+    log_lines.extend(["", "=" * 60, f"ALL DELIVERIES COMPLETE ({mode_label})", "=" * 60, "", "SUMMARY:"])
+    for driver_id, data in all_driver_results.items():
+        log_lines.append(
+            f"Driver {driver_id}: {data['addresses']} addresses | "
+            f"{data['time']:.2f} min ({data['time'] / 60:.2f} hours)"
+        )
+    log_lines.extend(["", "=" * 60, "FULL ROUTES BY DRIVER", "=" * 60])
+    for driver_id, data in all_driver_results.items():
+        full_route_nodes = []
+        for step in data["journey"]:
+            parts = split_route_path(step.get("route_str", ""))
+            if not full_route_nodes:
+                full_route_nodes.extend(parts)
+            elif full_route_nodes[-1] == parts[0]:
+                full_route_nodes.extend(parts[1:])
+            else:
+                full_route_nodes.extend(parts)
+        log_lines.append("")
+        log_lines.append(f"Driver {driver_id} Route:")
+        log_lines.append(" → ".join(full_route_nodes))
     log_lines.append(f"Leftover orders for next run: {len(leftover)}")
     log_path.write_text("\n".join(log_lines), encoding="utf-8")
     html_path = render_delivery_plan_html(output_path, run_dir / "06_delivery_plan.html")
@@ -1325,12 +1541,12 @@ def render_delivery_plan_html(workbook_path: Path, output_path: Path) -> Path:
     driver_sections = []
     for driver, driver_df in detail_df.groupby("Driver", sort=False):
         steps = []
+        full_route_nodes: list[str] = []
         for _, row in driver_df.iterrows():
-            route_nodes = [
-                str(part).strip()
-                for part in str(row.get("Route Path", "")).split("→")
-                if str(part).strip()
-            ]
+            route_nodes = split_route_path(row.get("Route Path", ""))
+            for node in route_nodes:
+                if not full_route_nodes or full_route_nodes[-1] != node:
+                    full_route_nodes.append(node)
             route_html = "".join(
                 render_route_node(node, str(row.get("City", "")), order_details)
                 for node in route_nodes
@@ -1350,9 +1566,20 @@ def render_delivery_plan_html(workbook_path: Path, output_path: Path) -> Path:
                 f"<ol class=\"route\">{route_html}</ol>"
                 "</article>"
             )
+        full_route_html = "".join(
+            f"<li><span>{index}</span><strong>{html.escape(node)}</strong></li>"
+            for index, node in enumerate(full_route_nodes, 1)
+        )
         driver_sections.append(
             "<section class=\"driver\">"
             f"<h2>{html.escape(str(driver))}</h2>"
+            "<article class=\"route-overview\">"
+            "<div class=\"step-head\">"
+            "<span>Full route</span>"
+            "<strong>Start to finish</strong>"
+            "</div>"
+            f"<ol class=\"full-route\">{full_route_html}</ol>"
+            "</article>"
             f"{''.join(steps)}"
             "</section>"
         )
@@ -1382,6 +1609,7 @@ def render_delivery_plan_html(workbook_path: Path, output_path: Path) -> Path:
     .driver {{ margin-top: 24px; }}
     .driver h2 {{ padding-bottom: 10px; border-bottom: 2px solid #17324d; }}
     .step {{ background: white; border: 1px solid #d9e0e7; border-radius: 8px; margin-top: 14px; padding: 16px; }}
+    .route-overview {{ background: white; border: 1px solid #c7d2dd; border-radius: 8px; margin-top: 14px; padding: 16px; }}
     .step-head {{ display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }}
     .step-head span {{ color: #65717d; }}
     .times {{ display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }}
@@ -1389,6 +1617,10 @@ def render_delivery_plan_html(workbook_path: Path, output_path: Path) -> Path:
     .route {{ display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0; list-style: none; }}
     .route li {{ border: 1px solid #cfd8e3; padding: 7px 9px; border-radius: 6px; background: #fbfcfd; max-width: 360px; }}
     .route li strong {{ display: block; }}
+    .full-route {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; padding: 0; margin: 12px 0 0; list-style: none; }}
+    .full-route li {{ display: grid; grid-template-columns: 32px 1fr; align-items: start; gap: 8px; border: 1px solid #cfd8e3; border-radius: 6px; background: #fbfcfd; padding: 8px; }}
+    .full-route span {{ display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 999px; background: #17324d; color: white; font-size: 12px; }}
+    .full-route strong {{ overflow-wrap: anywhere; }}
     .order-details {{ margin-top: 8px; display: grid; gap: 6px; }}
     .order-detail {{ border-top: 1px solid #e2e8f0; padding-top: 6px; font-size: 12px; color: #52606d; }}
     .order-detail span {{ display: block; font-weight: 700; }}
@@ -1412,6 +1644,14 @@ def render_delivery_plan_html(workbook_path: Path, output_path: Path) -> Path:
         encoding="utf-8",
     )
     return output_path
+
+
+def split_route_path(route_path: Any) -> list[str]:
+    return [
+        str(part).strip()
+        for part in str(route_path).split("→")
+        if str(part).strip()
+    ]
 
 
 def normalize_detail_key(city: str, address: str) -> tuple[str, str, str]:

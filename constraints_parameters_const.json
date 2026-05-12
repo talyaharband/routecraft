@@ -1,9 +1,9 @@
 {
   "drivers": 3,
-  "max_packages_per_driver": 20,
-  "selection_capacity_multiplier": 2,
+  "max_packages_per_driver": 30,
+  "selection_capacity_multiplier": 1.5,
   "ideal_shift_minutes": 420,
-  "max_shift_minutes": 720,
+  "max_shift_minutes": 600,
   "service_minutes_per_package": 4,
   "close_building_distance_meters": 150,
   "due_date_column": "required_delivery_date",
