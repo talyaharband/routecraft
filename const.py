@@ -13,6 +13,7 @@ import re
 import sys
 import types
 import traceback
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -183,7 +184,9 @@ def mock_distance_matrix(full_addresses: list[str], coords_dict: dict[str, Any])
 
 
 def load_mock_geocode_cache() -> dict[tuple[str, str], dict[str, Any]]:
-    path = MOCK_DATA_DIR / "geocoding_cache.xlsx"
+    path = CONST_MOCK_DATA_DIR / "geocoding_cache.xlsx"
+    if not path.exists():
+        path = MOCK_DATA_DIR / "geocoding_cache.xlsx"
     if not path.exists():
         return {}
     df = pd.read_excel(path).fillna("")
@@ -194,7 +197,9 @@ def load_mock_geocode_cache() -> dict[tuple[str, str], dict[str, Any]]:
 
 
 def load_mock_coords_cache() -> dict[str, dict[str, float]]:
-    path = MOCK_DATA_DIR / "distance_coords_cache.xlsx"
+    path = CONST_MOCK_DATA_DIR / "distance_coords_cache.xlsx"
+    if not path.exists():
+        path = MOCK_DATA_DIR / "distance_coords_cache.xlsx"
     if not path.exists():
         return {}
     df = pd.read_excel(path).fillna("")
@@ -211,7 +216,9 @@ def load_mock_coords_cache() -> dict[str, dict[str, float]]:
 
 
 def load_origin_duration_cache() -> dict[tuple[float, float, float, float], float]:
-    path = MOCK_DATA_DIR / "origin_duration_cache.xlsx"
+    path = CONST_MOCK_DATA_DIR / "origin_duration_cache.xlsx"
+    if not path.exists():
+        path = MOCK_DATA_DIR / "origin_duration_cache.xlsx"
     cache: dict[tuple[float, float, float, float], float] = {}
     if not path.exists():
         return cache
@@ -240,6 +247,9 @@ def mock_coords_from_cache(address: str, _key: str = "") -> tuple[dict[str, floa
 def mock_matrix_cache_path(group_value: Any) -> Path:
     safe_group = re.sub(r'[<>:"/\\|?*]+', "_", str(group_value).strip())
     safe_group = re.sub(r"\s+", "_", safe_group) or "unknown"
+    const_path = CONST_MOCK_DATA_DIR / "distance_matrices" / f"05_distance_matrix_group-{safe_group}.xlsx"
+    if const_path.exists():
+        return const_path
     return MOCK_DATA_DIR / "distance_matrices" / f"05_distance_matrix_group-{safe_group}.xlsx"
 
 
@@ -407,7 +417,9 @@ def parse_planning_date(value: Any) -> pd.Timestamp:
     text = clean_cell(value)
     if not text or text.lower() == "today":
         return pd.Timestamp.today().normalize()
-    parsed = pd.to_datetime(text, errors="coerce", dayfirst=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        parsed = pd.to_datetime(text, errors="coerce", dayfirst=False)
     if pd.isna(parsed):
         raise RuntimeError(f"Could not parse planning date: {value}")
     return pd.Timestamp(parsed).normalize()
@@ -416,17 +428,38 @@ def parse_planning_date(value: Any) -> pd.Timestamp:
 def parse_required_delivery_date(value: Any) -> pd.Timestamp | None:
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return None
+    if isinstance(value, (pd.Timestamp, datetime)):
+        parsed = pd.Timestamp(value).normalize()
+        if parsed.month <= 12 and parsed.day <= 12:
+            return pd.Timestamp(year=parsed.year, month=parsed.day, day=parsed.month)
+        return parsed
     text = clean_cell(value)
     if not text:
         return None
-    parsed = pd.to_datetime(text, errors="coerce", dayfirst=False)
+    for date_format in ("%d/%m/%Y", "%d/%m/%y"):
+        parsed = pd.to_datetime(text, format=date_format, errors="coerce")
+        if pd.notna(parsed):
+            return pd.Timestamp(parsed).normalize()
+    if re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}(?:\s+\d{1,2}:\d{2}:\d{2})?", text):
+        parsed = pd.to_datetime(text, errors="coerce")
+        if pd.notna(parsed):
+            return pd.Timestamp(parsed).normalize()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
     if pd.isna(parsed):
         return None
     return pd.Timestamp(parsed).normalize()
 
 
-def delivery_priority(value: Any, args: argparse.Namespace) -> int:
+def format_required_delivery_date(value: Any) -> str:
     due_date = parse_required_delivery_date(value)
+    if due_date is None:
+        return clean_cell(value)
+    return f"{due_date.day}/{due_date.month}/{due_date.year}"
+
+
+def delivery_priority_for_date(due_date: pd.Timestamp | None, args: argparse.Namespace) -> int:
     if due_date is None:
         return int(constraint_value(args, "no_due_date_priority", 999999))
     planning_date = parse_planning_date(constraint_value(args, "planning_date", "today"))
@@ -434,6 +467,10 @@ def delivery_priority(value: Any, args: argparse.Namespace) -> int:
     if days_until_due < 0:
         return int(constraint_value(args, "overdue_priority", 0))
     return days_until_due + 1
+
+
+def delivery_priority(value: Any, args: argparse.Namespace) -> int:
+    return delivery_priority_for_date(parse_required_delivery_date(value), args)
 
 
 def package_count_from_row(row: pd.Series) -> int:
@@ -449,17 +486,23 @@ def select_orders_for_current_run(
     due_col = str(constraint_value(args, "due_date_column", "required_delivery_date"))
     if due_col not in df.columns:
         df[due_col] = ""
-    df["required_delivery_date"] = df[due_col]
-    df["delivery_priority"] = df[due_col].apply(lambda value: delivery_priority(value, args))
+    parsed_due_dates = df[due_col].apply(parse_required_delivery_date)
+    df["required_delivery_date"] = df[due_col].apply(format_required_delivery_date)
+    df["delivery_priority"] = parsed_due_dates.apply(lambda value: delivery_priority_for_date(value, args))
     df["package_count"] = 1
     df["_selection_order"] = range(len(df))
-    capacity = int(constraint_value(args, "drivers", 3)) * int(constraint_value(args, "max_packages_per_driver", 100))
+    df["_parsed_required_delivery_date"] = parsed_due_dates
+    capacity = (
+        int(constraint_value(args, "drivers", 3))
+        * int(constraint_value(args, "max_packages_per_driver", 100))
+        * int(constraint_value(args, "selection_capacity_multiplier", 2))
+    )
     sorted_df = df.sort_values(
-        by=["delivery_priority", "required_delivery_date", "_selection_order"],
+        by=["delivery_priority", "_parsed_required_delivery_date", "_selection_order"],
         kind="stable",
     ).reset_index(drop=True)
-    selected = sorted_df.head(capacity).drop(columns=["_selection_order"])
-    deferred = sorted_df.iloc[capacity:].drop(columns=["_selection_order"])
+    selected = sorted_df.head(capacity).drop(columns=["_selection_order", "_parsed_required_delivery_date"])
+    deferred = sorted_df.iloc[capacity:].drop(columns=["_selection_order", "_parsed_required_delivery_date"])
     selected_path = run_dir / "02b_selected_orders_for_run.xlsx"
     deferred_path = run_dir / "02c_deferred_orders_next_run.xlsx"
     selected.to_excel(selected_path, index=False)
@@ -614,8 +657,8 @@ def stage_2_geocode(input_path: Path, run_dir: Path, args: argparse.Namespace) -
         raise RuntimeError("Stage 2 did not find any addresses with precise Google geocoding matches.")
 
     geocoded_df = pd.DataFrame(rows)
-    geocoded_df.to_excel(output_path, index=False)
     selected_df, deferred_df, selected_path, deferred_path = select_orders_for_current_run(geocoded_df, run_dir, args)
+    geocoded_df.to_excel(output_path, index=False)
     if geocode_cache_rows:
         pd.DataFrame(geocode_cache_rows).to_excel(run_dir / "02_geocoding_cache.xlsx", index=False)
     failure_path = record_geocode_failures(run_dir, failed_rows)
@@ -943,6 +986,60 @@ def choose_load_rows(remaining: pd.DataFrame, max_packages: int) -> pd.DataFrame
     return remaining.loc[load_indices].copy()
 
 
+def pop_deferred_batch(deferred_pool: pd.DataFrame, max_packages: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if deferred_pool.empty:
+        return deferred_pool.copy(), deferred_pool.copy()
+    pool = deferred_pool.sort_values(
+        by=["delivery_priority", "required_delivery_date"],
+        kind="stable",
+    )
+    selected_indices = []
+    packages = 0
+    for idx, row in pool.iterrows():
+        count = int(pd.to_numeric(row.get("package_count", 1), errors="coerce") or 1)
+        if packages + count > max_packages and selected_indices:
+            break
+        if packages + count > max_packages:
+            continue
+        selected_indices.append(idx)
+        packages += count
+        if packages >= max_packages:
+            break
+    batch = deferred_pool.loc[selected_indices].copy()
+    leftover = deferred_pool.drop(index=selected_indices).copy()
+    return batch, leftover
+
+
+def prepare_deferred_reload_batch(
+    deferred_batch: pd.DataFrame,
+    run_dir: Path,
+    args: argparse.Namespace,
+    driver_id: int,
+    load_number: int,
+    next_route_id: int,
+) -> tuple[pd.DataFrame, int, Path, list[Path]]:
+    if deferred_batch.empty:
+        return deferred_batch.copy(), next_route_id, run_dir, []
+    batch_dir = run_dir / f"06_deferred_driver-{driver_id}_load-{load_number}"
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    batch_input = batch_dir / "06a_deferred_orders_for_reload.xlsx"
+    deferred_batch.to_excel(batch_input, index=False)
+    clustered_path, _ = stage_3_cluster(batch_input, batch_dir, args)
+    grouped_path, _ = stage_4_group(clustered_path, batch_dir, args)
+    stage_5_distance_matrices(grouped_path, batch_dir, args)
+    prepared = pd.read_excel(grouped_path).fillna("")
+    prepared["_matrix_folder"] = str(batch_dir)
+    prepared["_route_id"] = range(next_route_id, next_route_id + len(prepared))
+    return prepared, next_route_id + len(prepared), batch_dir, [
+        batch_input,
+        clustered_path,
+        grouped_path,
+        *sorted(batch_dir.glob("04_cluster_map_*.png")),
+        *sorted(batch_dir.glob("05_distance_matrix_group-*.xlsx")),
+        batch_dir / "05_distance_coords_cache.xlsx",
+    ]
+
+
 def stage_6_delivery_plan(
     input_path: Path,
     matrix_folder: Path,
@@ -959,6 +1056,7 @@ def stage_6_delivery_plan(
     if "delivery_priority" not in df.columns:
         df["delivery_priority"] = int(constraint_value(args, "no_due_date_priority", 999999))
     df["_route_id"] = range(len(df))
+    df["_matrix_folder"] = str(matrix_folder)
 
     drivers = int(constraint_value(args, "drivers", 3))
     max_packages = int(constraint_value(args, "max_packages_per_driver", 100))
@@ -967,8 +1065,24 @@ def stage_6_delivery_plan(
     service_minutes = float(constraint_value(args, "service_minutes_per_package", 4))
 
     remaining = df.copy()
+    deferred_path = run_dir / "02c_deferred_orders_next_run.xlsx"
+    if not deferred_path.exists():
+        deferred_path = input_path.parent / "02c_deferred_orders_next_run.xlsx"
+    deferred_pool = pd.read_excel(deferred_path).fillna("") if deferred_path.exists() else pd.DataFrame()
+    if deferred_path.exists():
+        try:
+            (run_dir / "02c_deferred_orders_next_run.xlsx").write_bytes(deferred_path.read_bytes())
+        except OSError:
+            pass
+    if not deferred_pool.empty and "delivery_priority" not in deferred_pool.columns:
+        due_col = str(constraint_value(args, "due_date_column", "required_delivery_date"))
+        deferred_pool["delivery_priority"] = deferred_pool.get(due_col, "").apply(lambda value: delivery_priority(value, args))
+    if not deferred_pool.empty and "package_count" not in deferred_pool.columns:
+        deferred_pool["package_count"] = 1
+    next_route_id = len(df)
     all_driver_results: dict[int, dict[str, Any]] = {}
     log_lines = []
+    extra_output_files: list[Path] = []
 
     for driver_id in range(1, drivers + 1):
         driver_time = 0.0
@@ -979,16 +1093,35 @@ def stage_6_delivery_plan(
         current_name = WAREHOUSE_NAME
         load_number = 1
 
-        while not remaining.empty and driver_time < max_shift:
+        while driver_time < max_shift:
+            if remaining.empty:
+                if driver_time >= ideal_shift or deferred_pool.empty:
+                    break
+                deferred_batch, deferred_pool = pop_deferred_batch(deferred_pool, max_packages)
+                prepared, next_route_id, _batch_dir, batch_files = prepare_deferred_reload_batch(
+                    deferred_batch,
+                    run_dir,
+                    args,
+                    driver_id,
+                    load_number,
+                    next_route_id,
+                )
+                extra_output_files.extend(path for path in batch_files if path.exists())
+                if prepared.empty:
+                    break
+                remaining = pd.concat([remaining, prepared], ignore_index=True, sort=False)
+                log_lines.append(
+                    f"Driver {driver_id} pulled {len(deferred_batch)} deferred orders for load {load_number}."
+                )
             load_rows = choose_load_rows(remaining, max_packages)
             if load_rows.empty:
                 break
             delivered_this_load: list[int] = []
             load_started = False
 
-            for group_value, group_rows in load_rows.groupby("cluster_group", sort=False):
+            for (folder_value, group_value), group_rows in load_rows.groupby(["_matrix_folder", "cluster_group"], sort=False):
                 group_rows = group_rows.copy()
-                matrix_df = load_group_matrix(matrix_folder, group_value)
+                matrix_df = load_group_matrix(Path(folder_value), group_value)
                 active_rows = group_rows[~group_rows["_route_id"].isin(delivered_this_load)]
                 if active_rows.empty:
                     continue
@@ -1057,7 +1190,9 @@ def stage_6_delivery_plan(
 
             if delivered_this_load:
                 remaining = remaining[~remaining["_route_id"].isin(delivered_this_load)].copy()
-            if remaining.empty or not load_started:
+            if not load_started:
+                break
+            if remaining.empty and (driver_time >= ideal_shift or deferred_pool.empty):
                 break
             return_to_warehouse = drive_duration_minutes(current_lat, current_lng, WAREHOUSE_LAT, WAREHOUSE_LNG, args, api_key)
             if driver_time + return_to_warehouse >= max_shift:
@@ -1090,7 +1225,14 @@ def stage_6_delivery_plan(
         }
 
     leftover_path = run_dir / "06_leftover_orders_next_run.xlsx"
-    leftover = remaining.drop(columns=["_route_id"], errors="ignore")
+    leftover = pd.concat(
+        [
+            remaining.drop(columns=["_route_id", "_matrix_folder"], errors="ignore"),
+            deferred_pool.drop(columns=["_route_id", "_matrix_folder"], errors="ignore"),
+        ],
+        ignore_index=True,
+        sort=False,
+    )
     leftover.to_excel(leftover_path, index=False)
 
     summary_rows = []
@@ -1099,6 +1241,8 @@ def stage_6_delivery_plan(
         summary_rows.append(
             {
                 "Driver": f"Driver {driver_id}",
+                "Configured Drivers": drivers,
+                "Capacity Per Driver": max_packages,
                 "Addresses Delivered": data["addresses"],
                 "Clusters Visited": len([step for step in data["journey"] if step.get("segment_type") == "delivery"]),
                 "Total Time (min)": f"{data['time']:.2f}",
@@ -1149,7 +1293,7 @@ def stage_6_delivery_plan(
     log_lines.append(f"Leftover orders for next run: {len(leftover)}")
     log_path.write_text("\n".join(log_lines), encoding="utf-8")
     html_path = render_delivery_plan_html(output_path, run_dir / "06_delivery_plan.html")
-    output_files = [output_path, html_path, log_path, leftover_path]
+    output_files = [output_path, html_path, log_path, leftover_path, *extra_output_files]
     return output_path, StageResult(
         6,
         "Plan constrained multi-load deliveries",
@@ -1167,7 +1311,8 @@ def render_delivery_plan_html(workbook_path: Path, output_path: Path) -> Path:
     summary_cards = []
     if not summary_df.empty:
         totals = {
-            "Drivers": len(summary_df),
+            "Drivers": summary_df["Configured Drivers"].iloc[0] if "Configured Drivers" in summary_df.columns else len(summary_df),
+            "Capacity / Driver": summary_df["Capacity Per Driver"].iloc[0] if "Capacity Per Driver" in summary_df.columns else "",
             "Addresses": int(pd.to_numeric(summary_df["Addresses Delivered"], errors="coerce").fillna(0).sum()),
             "Clusters": int(pd.to_numeric(summary_df["Clusters Visited"], errors="coerce").fillna(0).sum()),
             "Max Shift": f"{pd.to_numeric(summary_df['Total Time (hours)'], errors='coerce').max():.2f} h",
