@@ -9,5 +9,7 @@
   "due_date_column": "required_delivery_date",
   "planning_date": "today",
   "overdue_priority": 0,
-  "no_due_date_priority": 999999
+  "no_due_date_priority": 999999,
+  "warehouse_name": "WAREHOUSE ESHTAOL",
+  "warehouse_address": "Eshtaol, Israel"
 }

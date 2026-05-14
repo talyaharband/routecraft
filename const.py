@@ -371,6 +371,63 @@ def geocode_precise_address(address: str, key: str, city: str = "") -> tuple[Any
     return None, None, False, "google could not accurately find this address"
 
 
+def geocode_warehouse_address(address: str, key: str) -> tuple[float, float, str]:
+    response = requests.get(
+        "https://maps.googleapis.com/maps/api/geocode/json",
+        params={
+            "address": address,
+            "components": "country:IL",
+            "language": "he",
+            "key": key,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if data.get("status") != "OK" or not data.get("results"):
+        raise RuntimeError(f"Could not geocode warehouse address '{address}': {data.get('status', 'no result')}")
+    location = data["results"][0].get("geometry", {}).get("location", {})
+    lat = location.get("lat")
+    lng = location.get("lng")
+    if lat is None or lng is None:
+        raise RuntimeError(f"Could not geocode warehouse address '{address}': missing coordinates")
+    return float(lat), float(lng), str(data["results"][0].get("formatted_address", address))
+
+
+def resolve_warehouse(args: argparse.Namespace) -> dict[str, Any]:
+    name = clean_cell(constraint_value(args, "warehouse_name", WAREHOUSE_NAME)) or WAREHOUSE_NAME
+    address = clean_cell(constraint_value(args, "warehouse_address", "")) or name
+    default_addresses = {WAREHOUSE_NAME.lower(), "eshtaol", "eshtaol, israel", "אשתאול"}
+    if address.lower() in default_addresses:
+        return {
+            "name": name,
+            "address": address,
+            "lat": WAREHOUSE_LAT,
+            "lng": WAREHOUSE_LNG,
+            "source": "default_coordinates",
+            "formatted_address": address,
+        }
+    if args.mock_google:
+        lat, lng = mock_lat_lng(address)
+        return {
+            "name": name,
+            "address": address,
+            "lat": lat,
+            "lng": lng,
+            "source": "mock_coordinates",
+            "formatted_address": address,
+        }
+    lat, lng, formatted = geocode_warehouse_address(address, get_google_key(args))
+    return {
+        "name": name,
+        "address": address,
+        "lat": lat,
+        "lng": lng,
+        "source": "google",
+        "formatted_address": formatted,
+    }
+
+
 def record_geocode_failures(run_dir: Path, failed_rows: list[dict[str, Any]]) -> Path | None:
     if not failed_rows:
         return None
@@ -910,15 +967,34 @@ def drive_duration_minutes(
     args: argparse.Namespace,
     api_key: str | None,
 ) -> int:
+    minutes, _source = drive_duration_minutes_with_source(
+        origin_lat,
+        origin_lng,
+        dest_lat,
+        dest_lng,
+        args,
+        api_key,
+    )
+    return minutes
+
+
+def drive_duration_minutes_with_source(
+    origin_lat: Any,
+    origin_lng: Any,
+    dest_lat: Any,
+    dest_lng: Any,
+    args: argparse.Namespace,
+    api_key: str | None,
+) -> tuple[int, str]:
     try:
         cache_key = (round(float(origin_lat), 6), round(float(origin_lng), 6), round(float(dest_lat), 6), round(float(dest_lng), 6))
         cached_minutes = load_origin_duration_cache().get(cache_key)
         if cached_minutes is not None:
-            return int(round(cached_minutes))
+            return int(round(cached_minutes)), "origin_cache"
     except Exception:
         pass
     if args.mock_google or not api_key:
-        return estimate_drive_minutes_between(origin_lat, origin_lng, dest_lat, dest_lng)
+        return estimate_drive_minutes_between(origin_lat, origin_lng, dest_lat, dest_lng), "estimate"
     response = requests.get(
         "https://maps.googleapis.com/maps/api/distancematrix/json",
         params={
@@ -933,12 +1009,12 @@ def drive_duration_minutes(
     response.raise_for_status()
     data = response.json()
     if data.get("status") != "OK":
-        return 999
+        return 999, "google_error"
     element = data["rows"][0]["elements"][0]
     if element.get("status") != "OK":
-        return 999
+        return 999, "google_error"
     seconds = element.get("duration_in_traffic", element.get("duration", {})).get("value")
-    return max(0, int(round((seconds or 0) / 60)))
+    return max(0, int(round((seconds or 0) / 60))), "google"
 
 
 def load_group_matrix(matrix_folder: Path, group_value: Any) -> pd.DataFrame:
@@ -957,7 +1033,7 @@ def add_current_origin_matrix(
     current_lng: Any,
     args: argparse.Namespace,
     api_key: str | None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[tuple[str, str], str]]:
     labels = [matrix_label(row) for _, row in group_rows.iterrows()]
     matrix_df = matrix_df.reindex(index=labels, columns=labels)
     if matrix_df.isna().any().any():
@@ -966,8 +1042,9 @@ def add_current_origin_matrix(
     out.loc["ORIGIN", "ORIGIN"] = 0
     out.loc[labels, "ORIGIN"] = 999
     out.loc[labels, labels] = matrix_df.values
+    edge_sources: dict[tuple[str, str], str] = {}
     for label, (_, row) in zip(labels, group_rows.iterrows()):
-        out.loc["ORIGIN", label] = drive_duration_minutes(
+        minutes, source = drive_duration_minutes_with_source(
             current_lat,
             current_lng,
             row.get("LAT"),
@@ -975,7 +1052,9 @@ def add_current_origin_matrix(
             args,
             api_key,
         )
-    return out
+        out.loc["ORIGIN", label] = minutes
+        edge_sources[("ORIGIN", label)] = source
+    return out, edge_sources
 
 
 def cluster_key_for_row(row: pd.Series) -> tuple[str, str]:
@@ -1034,9 +1113,9 @@ def tsp_route_for_rows(
     current_lng: Any,
     args: argparse.Namespace,
     api_key: str | None,
-) -> tuple[list[int], pd.DataFrame, str]:
+) -> tuple[list[int], pd.DataFrame, str, dict[tuple[str, str], str]]:
     matrix_df = load_group_matrix(matrix_folder, group_value)
-    modified_matrix = add_current_origin_matrix(
+    modified_matrix, edge_sources = add_current_origin_matrix(
         matrix_df,
         group_rows,
         current_lat,
@@ -1048,7 +1127,63 @@ def tsp_route_for_rows(
     stderr = io.StringIO()
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
         tsp_route, _ = deliveries.run_tsp_on_matrix(modified_matrix)
-    return tsp_route, modified_matrix, stdout.getvalue() + stderr.getvalue()
+    return tsp_route, modified_matrix, stdout.getvalue() + stderr.getvalue(), edge_sources
+
+
+def can_deliver_after_reload(
+    deliveries: Any,
+    remaining: pd.DataFrame,
+    active_city: Any,
+    pending_cluster_key: tuple[str, str] | None,
+    warehouse_lat: float,
+    warehouse_lng: float,
+    driver_time_after_return: float,
+    max_shift: float,
+    max_packages: int,
+    service_minutes: float,
+    args: argparse.Namespace,
+    api_key: str | None,
+) -> bool:
+    closest, _next_city, _next_pending = closest_next_row(
+        remaining,
+        warehouse_lat,
+        warehouse_lng,
+        active_city,
+        pending_cluster_key,
+    )
+    if closest is None:
+        return False
+    folder_value, group_value = cluster_key_for_row(closest)
+    group_rows = remaining[cluster_key_mask(remaining, (folder_value, group_value))].copy()
+    if group_rows.empty:
+        return False
+    try:
+        tsp_route, modified_matrix, _tsp_log, _edge_sources = tsp_route_for_rows(
+            deliveries,
+            Path(folder_value),
+            group_value,
+            group_rows,
+            warehouse_lat,
+            warehouse_lng,
+            args,
+            api_key,
+        )
+    except Exception:
+        return False
+
+    prev_idx = tsp_route[0]
+    for curr_idx in tsp_route[1:]:
+        label = modified_matrix.columns[curr_idx]
+        match = group_rows[group_rows.apply(lambda row: matrix_label(row) == label, axis=1)]
+        if match.empty:
+            prev_idx = curr_idx
+            continue
+        row = match.iloc[0]
+        packages = package_count_from_row(row)
+        step_travel = float(modified_matrix.iloc[prev_idx, curr_idx])
+        step_delivery = packages * service_minutes
+        return driver_time_after_return + step_travel + step_delivery <= max_shift
+    return False
 
 
 def choose_load_rows(remaining: pd.DataFrame, max_packages: int) -> pd.DataFrame:
@@ -1132,6 +1267,10 @@ def stage_6_delivery_plan(
     deliveries = import_script(ROOT / "deliveries.py", "routecraft_deliveries_const")
     output_path = run_dir / "06_delivery_plan.xlsx"
     api_key = None if args.mock_google else get_distance_key(args)
+    warehouse = resolve_warehouse(args)
+    warehouse_name = str(warehouse["name"])
+    warehouse_lat = float(warehouse["lat"])
+    warehouse_lng = float(warehouse["lng"])
 
     df = pd.read_excel(input_path).fillna("")
     if df.empty:
@@ -1179,6 +1318,10 @@ def stage_6_delivery_plan(
             f"Capacity per driver load: {max_packages}",
             f"Ideal shift minutes: {ideal_shift:.0f}",
             f"Max shift minutes: {max_shift:.0f}",
+            f"Warehouse: {warehouse_name}",
+            f"Warehouse address: {warehouse['address']}",
+            f"Warehouse coordinates: {warehouse_lat:.6f}, {warehouse_lng:.6f}",
+            f"Warehouse coordinate source: {warehouse['source']}",
             "",
             "=" * 60,
             "STARTING MULTI-VEHICLE TSP JOURNEY (CONSTRAINT PRODUCTION)"
@@ -1192,9 +1335,9 @@ def stage_6_delivery_plan(
         driver_time = 0.0
         driver_packages = 0
         journey = []
-        current_lat = WAREHOUSE_LAT
-        current_lng = WAREHOUSE_LNG
-        current_name = WAREHOUSE_NAME
+        current_lat = warehouse_lat
+        current_lng = warehouse_lng
+        current_name = warehouse_name
         load_number = 1
         load_packages = 0
 
@@ -1229,15 +1372,35 @@ def stage_6_delivery_plan(
                 )
 
             if load_packages >= max_packages:
-                return_to_warehouse = drive_duration_minutes(
+                return_to_warehouse, return_source = drive_duration_minutes_with_source(
                     current_lat,
                     current_lng,
-                    WAREHOUSE_LAT,
-                    WAREHOUSE_LNG,
+                    warehouse_lat,
+                    warehouse_lng,
                     args,
                     api_key,
                 )
                 if driver_time >= ideal_shift or driver_time + return_to_warehouse >= max_shift:
+                    break
+                if not can_deliver_after_reload(
+                    deliveries,
+                    remaining,
+                    active_city,
+                    pending_cluster_key,
+                    warehouse_lat,
+                    warehouse_lng,
+                    driver_time + return_to_warehouse,
+                    max_shift,
+                    max_packages,
+                    service_minutes,
+                    args,
+                    api_key,
+                ):
+                    log_lines.append(
+                        f"Driver {driver_id} has enough time to return to {warehouse_name} "
+                        f"({return_to_warehouse:.2f} min, source: {return_source}) but not enough "
+                        "time to complete another delivery after reloading. Ending shift at current stop."
+                    )
                     break
                 driver_time += return_to_warehouse
                 journey.append(
@@ -1245,21 +1408,23 @@ def stage_6_delivery_plan(
                         "load": load_number,
                         "cluster": "RELOAD",
                         "city": "Warehouse",
-                        "route_str": f"{current_name} → {WAREHOUSE_NAME}",
+                        "route_str": f"{current_name} → {warehouse_name}",
                         "travel_time": return_to_warehouse,
                         "delivery_time": 0,
                         "cost": return_to_warehouse,
-                        "endpoint": WAREHOUSE_NAME,
+                        "endpoint": warehouse_name,
                         "packages": 0,
                         "segment_type": "reload",
+                        "travel_time_source": return_source,
                     }
                 )
                 log_lines.append(
-                    f"Driver {driver_id} returning to Eshtaol to reload: {return_to_warehouse:.2f} min."
+                    f"Driver {driver_id} returning to {warehouse_name} to reload: {return_to_warehouse:.2f} min. "
+                    f"Source: {return_source}."
                 )
-                current_lat = WAREHOUSE_LAT
-                current_lng = WAREHOUSE_LNG
-                current_name = WAREHOUSE_NAME
+                current_lat = warehouse_lat
+                current_lng = warehouse_lng
+                current_name = warehouse_name
                 load_number += 1
                 load_packages = 0
 
@@ -1286,7 +1451,7 @@ def stage_6_delivery_plan(
                 f"Time: {driver_time:.2f}/{max_shift:.0f} min"
             )
 
-            tsp_route, modified_matrix, tsp_log = tsp_route_for_rows(
+            tsp_route, modified_matrix, tsp_log, edge_sources = tsp_route_for_rows(
                 deliveries,
                 Path(folder_value),
                 group_value,
@@ -1305,6 +1470,7 @@ def stage_6_delivery_plan(
             delivery_time = 0.0
             segment_rows: list[pd.Series] = []
             delivered_ids: list[int] = []
+            travel_sources: list[str] = []
             stop_reason = ""
 
             for curr_idx in tsp_route[1:]:
@@ -1317,6 +1483,8 @@ def stage_6_delivery_plan(
                 row = match.iloc[0]
                 packages = package_count_from_row(row)
                 step_travel = float(modified_matrix.iloc[prev_idx, curr_idx])
+                prev_label = modified_matrix.columns[prev_idx]
+                travel_sources.append(edge_sources.get((prev_label, label), "matrix"))
                 step_delivery = packages * service_minutes
                 total_step = step_travel + step_delivery
                 if load_packages + packages > max_packages:
@@ -1371,12 +1539,14 @@ def stage_6_delivery_plan(
                     "endpoint": current_name,
                     "packages": sum(package_count_from_row(row) for row in segment_rows),
                     "segment_type": "delivery",
+                    "travel_time_source": " + ".join(dict.fromkeys(travel_sources)) if travel_sources else "",
                 }
             )
             remaining = remaining[~remaining["_route_id"].isin(delivered_ids)].copy()
             log_lines.append(f"Route: {' → '.join(route_names)}")
             log_lines.append(
                 f"Travel: {travel_time:.2f} min | Delivery: {delivery_time:.2f} min | "
+                f"Source: {' + '.join(dict.fromkeys(travel_sources)) if travel_sources else 'n/a'} | "
                 f"Shift time: {driver_time:.2f} min | Load packages: {load_packages}/{max_packages}"
             )
 
@@ -1460,6 +1630,7 @@ def stage_6_delivery_plan(
                     "Packages": step.get("packages", 0),
                     "Total Time (min)": f"{step['cost']:.2f}",
                     "Travel Time": f"{step['travel_time']:.2f}",
+                    "Travel Time Source": step.get("travel_time_source", ""),
                     "Delivery Time": f"{step['delivery_time']:.2f}",
                     "Route Path": step["route_str"],
                     "Endpoint": step["endpoint"],
@@ -1480,6 +1651,11 @@ def stage_6_delivery_plan(
                     "Max Packages Per Driver": max_packages,
                     "Ideal Shift Minutes": ideal_shift,
                     "Max Shift Minutes": max_shift,
+                    "Warehouse Name": warehouse_name,
+                    "Warehouse Address": warehouse["address"],
+                    "Warehouse Latitude": warehouse_lat,
+                    "Warehouse Longitude": warehouse_lng,
+                    "Warehouse Coordinate Source": warehouse["source"],
                 }
             ]
         ).to_excel(writer, sheet_name="Run Constraints", index=False)
@@ -1560,6 +1736,7 @@ def render_delivery_plan_html(workbook_path: Path, output_path: Path) -> Path:
                 "<div class=\"times\">"
                 f"<span>Total {html.escape(str(row.get('Total Time (min)', '')))} min</span>"
                 f"<span>Travel {html.escape(str(row.get('Travel Time', '')))} min</span>"
+                f"<span>Source {html.escape(str(row.get('Travel Time Source', '')) or 'n/a')}</span>"
                 f"<span>Delivery {html.escape(str(row.get('Delivery Time', '')))} min</span>"
                 f"<span>Shift {html.escape(str(row.get('Shift Time So Far', '')))} min</span>"
                 "</div>"

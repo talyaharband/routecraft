@@ -17,4 +17,5 @@
   "future_due_penalty": 75000,
   "no_due_date_penalty": 25000,
   "require_all_deliveries": false
+
 }
