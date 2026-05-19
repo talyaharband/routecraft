@@ -12,6 +12,7 @@ RAW_COLUMN_ALIASES = {
     "client_id": ["client id", "client_id", "clientid"],
     "site_id": ["site id", "site_id", "siteid"],
     "site_name": ["site name", "site_name", "sitename"],
+    "ship_to_city": ["ship to city", "ship_to_city", "ship to_city"],
     "ship_to_street1": ["ship to street 1", "ship_to_street1", "ship to street1"],
     "ship_to_street2": ["ship to street 2", "ship_to_street2", "ship to street2"],
     "required_delivery_date": [
@@ -81,6 +82,16 @@ def strip_city_from_address(address: str, city: str) -> str:
     return re.sub(re.escape(city), " ", address, flags=re.IGNORECASE).strip()
 
 
+def clean_address_text(value: Any, city: Any) -> str:
+    text = clean_cell(value)
+    text = strip_city_from_address(text, clean_cell(city))
+    text = text.replace("\\", " ").replace("|", " ")
+    text = re.sub(r"[,:;]+", " ", text)
+    text = re.sub(r"\b(טל|טלפון|נייד|פלאפון)\b.*$", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def normalize_address_text(street1: Any, street2: Any, city: Any) -> str:
     text = " ".join(part for part in [clean_cell(street1), clean_cell(street2)] if part)
     text = strip_city_from_address(text, clean_cell(city))
@@ -91,7 +102,28 @@ def normalize_address_text(street1: Any, street2: Any, city: Any) -> str:
     return text
 
 
+def remove_secondary_address_details(address: str) -> str:
+    text = clean_cell(address)
+    text = re.sub(r"\b(?:מספר|מס׳|מס')\s+(?=\d)", "", text)
+    text = re.sub(r"\b(?:מספר\s+)?(?:דירה|קומה|כניסה|בניין|בנין|יחידה|דלת)\b.*$", "", text)
+    text = re.sub(r"\b(?:apt|apartment|floor|entrance|unit)\b.*$", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text).strip(" ,-/")
+
+
+def is_date_like_number(value: str) -> bool:
+    text = clean_cell(value)
+    if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}", text):
+        return True
+    if re.match(r"^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$", text):
+        return True
+    return False
+
+
 def parse_street_and_number(address: str) -> tuple[str, str, str]:
+    if not address:
+        return "", "", "empty address"
+
+    address = remove_secondary_address_details(address)
     if not address:
         return "", "", "empty address"
 
@@ -101,6 +133,8 @@ def parse_street_and_number(address: str) -> tuple[str, str, str]:
         return address.strip(), "", "missing house number"
 
     number = match.group(0).strip()
+    if is_date_like_number(number):
+        return address.strip(), "", "date-like value is not a house number"
     before = address[: match.start()].strip(" ,-/")
     after = address[match.end() :].strip(" ,-/")
 
@@ -123,6 +157,35 @@ def normalize_street_name(street: str) -> str:
     return re.sub(r"\s+", " ", street).strip()
 
 
+def parse_shipping_address(street1: Any, street2: Any, city: Any) -> tuple[str, str, str, str]:
+    city_text = clean_cell(city)
+    part1 = clean_address_text(street1, city_text)
+    part2 = clean_address_text(street2, city_text)
+    merged = " ".join(part for part in [part1, part2] if part)
+    candidates = [
+        part1,
+        " ".join(part for part in [part1, part2] if part),
+        part2,
+    ]
+    seen = set()
+    last_error = "empty address"
+    for candidate in candidates:
+        candidate = clean_cell(candidate)
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        street, house_number, parse_error = parse_street_and_number(candidate)
+        last_error = parse_error
+        if street and house_number:
+            street = re.sub(r"^(רחוב|רח׳|רח'|רח)\s+", "", street).strip()
+            street = re.sub(r"\b(?:מספר|מס׳|מס')$", "", street).strip()
+            street = re.sub(r"^ר\s+", "רבי ", street)
+            street = re.sub(r"\bרשב[\"׳']?י\b", "רבי שמעון בר יוחאי", street)
+            street = re.sub(r"\bרבי עקיבה\b", "רבי עקיבא", street)
+            return street, house_number, "", merged
+    return "", "", last_error, merged
+
+
 def validate_components(city: str, street: str, house_number: str) -> tuple[bool, str]:
     if not city:
         return False, "missing city"
@@ -132,44 +195,46 @@ def validate_components(city: str, street: str, house_number: str) -> tuple[bool
         return False, "missing house number"
     if not re.match(r"^\d+", house_number):
         return False, "invalid house number"
+    if is_date_like_number(house_number):
+        return False, "date-like value is not a house number"
+    if re.fullmatch(r"[\d\s/-]+", street):
+        return False, "missing street"
     return True, "verified by Israeli address parser"
 
 
 def clean_raw_orders(input_path: Path, run_dir: Path) -> dict[str, Path]:
     df = pd.read_excel(input_path).fillna("")
+    df["_source_row"] = range(2, len(df) + 2)
     columns = resolve_columns(df)
     missing = [
         name
-        for name in ["order_id", "client_id", "site_id", "site_name", "ship_to_street1", "ship_to_street2", "comments"]
+        for name in ["ship_to_city", "ship_to_street1", "ship_to_street2"]
         if name not in columns
     ]
     if missing:
         raise RuntimeError(f"Stage 1 input is missing columns: {', '.join(missing)}")
 
-    if "required_delivery_date" in columns:
-        df = df.drop(columns=[columns["required_delivery_date"]])
-
-    df = df.sort_values(by=[columns["site_name"]], kind="stable").reset_index(drop=True)
+    sort_col = columns.get("site_name") or columns["ship_to_city"]
+    df = df.sort_values(by=[sort_col], kind="stable").reset_index(drop=True)
 
     good_address_rows = []
     good_original_rows = []
     failed_rows = []
 
     for source_index, row in df.iterrows():
-        city = clean_cell(row[columns["site_name"]])
-        merged = normalize_address_text(
+        city = clean_cell(row[columns["ship_to_city"]])
+        street, house_number, parse_error, merged = parse_shipping_address(
             row[columns["ship_to_street1"]],
             row[columns["ship_to_street2"]],
             city,
         )
-        street, house_number, parse_error = parse_street_and_number(merged)
         valid, status = validate_components(city, street, house_number)
         city_code = KNOWN_CITY_CODES.get(city, "")
 
         result = row.to_dict()
         result.update(
             {
-                "source_row": source_index + 2,
+                "source_row": row["_source_row"],
                 "City": city,
                 "Street_Name": street,
                 "House_Number": house_number,
@@ -185,13 +250,19 @@ def clean_raw_orders(input_path: Path, run_dir: Path) -> dict[str, Path]:
                     "City": city,
                     "Street_Name": street,
                     "House_Number": house_number,
+                    "source_row": row["_source_row"],
+                    **(
+                        {"required_delivery_date": row[columns["required_delivery_date"]]}
+                        if "required_delivery_date" in columns
+                        else {}
+                    ),
                 }
             )
             good_original_rows.append(result)
         else:
             failed_rows.append(result)
 
-    result_columns = list(df.columns) + [
+    result_columns = [col for col in df.columns if col != "_source_row"] + [
         "source_row",
         "City",
         "Street_Name",
@@ -200,7 +271,10 @@ def clean_raw_orders(input_path: Path, run_dir: Path) -> dict[str, Path]:
         "city_code",
         "cleanup_status",
     ]
-    good_addresses = pd.DataFrame(good_address_rows, columns=["City", "Street_Name", "House_Number"])
+    good_address_columns = ["City", "Street_Name", "House_Number", "source_row"]
+    if "required_delivery_date" in columns:
+        good_address_columns.append("required_delivery_date")
+    good_addresses = pd.DataFrame(good_address_rows, columns=good_address_columns)
     good_original = pd.DataFrame(good_original_rows, columns=result_columns)
     failed = pd.DataFrame(failed_rows, columns=result_columns)
 

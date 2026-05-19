@@ -1,6 +1,6 @@
 {
-  "drivers": 3,
-  "max_packages_per_driver": 30,
+  "drivers": 5,
+  "max_packages_per_driver": 50,
   "selection_capacity_multiplier": 1.5,
   "ideal_shift_minutes": 420,
   "max_shift_minutes": 600,

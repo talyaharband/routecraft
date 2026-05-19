@@ -581,7 +581,10 @@ def stage_1_cleanup(input_path: Path, run_dir: Path, args: argparse.Namespace) -
     city_col = find_raw_col(df, "City", "site name", "site_name")
     street_col = find_raw_col(df, "Street_Name", "street name", "ship to street 1", "ship_to_street1")
     number_col = find_raw_col(df, "House_Number", "house number", "building number", "ship to street 2", "ship_to_street2")
-    if city_col and street_col and number_col:
+    has_raw_shipping_cols = all(
+        find_raw_col(df, name) for name in ["ship_to_city", "ship_to_street1", "ship_to_street2"]
+    )
+    if city_col and street_col and number_col and not has_raw_shipping_cols:
         rows = []
         failed_rows = []
         for source_index, row in df.iterrows():
@@ -625,13 +628,22 @@ def stage_1_cleanup(input_path: Path, run_dir: Path, args: argparse.Namespace) -
             original_df = pd.read_excel(original_path).fillna("")
             source_due = df[[due_col]].copy()
             source_due["source_row"] = source_due.index + 2
-            merged = original_df.merge(source_due, on="source_row", how="left")
-            merged = merged.rename(columns={due_col: "required_delivery_date"})
+            if "required_delivery_date" not in original_df.columns:
+                merged = original_df.merge(source_due, on="source_row", how="left")
+                merged = merged.rename(columns={due_col: "required_delivery_date"})
+            else:
+                merged = original_df
             merged.to_excel(original_path, index=False)
             shaped_df = pd.read_excel(shaped_path).fillna("")
-            extra_cols = ["source_row", "required_delivery_date"]
-            shaped_extra = merged[["City", "Street_Name", "House_Number", *extra_cols]]
-            shaped_df = shaped_df.merge(shaped_extra, on=["City", "Street_Name", "House_Number"], how="left")
+            if "source_row" not in shaped_df.columns:
+                shaped_df = shaped_df.reset_index(drop=True)
+                shaped_df["source_row"] = merged["source_row"].values[: len(shaped_df)]
+            if "required_delivery_date" not in shaped_df.columns:
+                shaped_df = shaped_df.merge(
+                    source_due.rename(columns={due_col: "required_delivery_date"}),
+                    on="source_row",
+                    how="left",
+                )
             shaped_df.to_excel(shaped_path, index=False)
 
     return shaped_path, StageResult(
@@ -1104,6 +1116,21 @@ def remaining_city_has_rows(remaining: pd.DataFrame, city: Any) -> bool:
     return bool(remaining["City"].astype(str).eq(str(city)).any())
 
 
+def greedy_tsp_route(matrix_df: pd.DataFrame) -> tuple[list[int], float]:
+    matrix = matrix_df.to_numpy()
+    unvisited = set(range(1, len(matrix_df)))
+    route = [0]
+    total_cost = 0.0
+    current = 0
+    while unvisited:
+        next_idx = min(unvisited, key=lambda idx: float(matrix[current, idx]))
+        total_cost += float(matrix[current, next_idx])
+        route.append(next_idx)
+        unvisited.remove(next_idx)
+        current = next_idx
+    return route, total_cost
+
+
 def tsp_route_for_rows(
     deliveries: Any,
     matrix_folder: Path,
@@ -1125,8 +1152,16 @@ def tsp_route_for_rows(
     )
     stdout = io.StringIO()
     stderr = io.StringIO()
-    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-        tsp_route, _ = deliveries.run_tsp_on_matrix(modified_matrix)
+    exact_tsp_limit = int(constraint_value(args, "exact_tsp_node_limit", 18))
+    if len(modified_matrix) > exact_tsp_limit:
+        tsp_route, tsp_cost = greedy_tsp_route(modified_matrix)
+        stdout.write(
+            f"Using greedy TSP fallback for {len(modified_matrix)} nodes "
+            f"(exact limit {exact_tsp_limit}); estimated cost {tsp_cost:.2f}.\n"
+        )
+    else:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            tsp_route, _ = deliveries.run_tsp_on_matrix(modified_matrix)
     return tsp_route, modified_matrix, stdout.getvalue() + stderr.getvalue(), edge_sources
 
 
