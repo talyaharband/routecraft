@@ -1,0 +1,18 @@
+{
+  "drivers": 3,
+  "max_packages_per_driver": 30,
+  "selection_capacity_multiplier": 1.2,
+  "ideal_shift_minutes": 420,
+  "max_shift_minutes": 600,
+  "service_minutes_per_package": 4,
+  "iterative_address_step": 10,
+  "iterative_max_iterations": 25,
+  "enable_deferred_reload_batches": false,
+  "close_building_distance_meters": 150,
+  "due_date_column": "required_delivery_date",
+  "planning_date": "today",
+  "overdue_priority": 0,
+  "no_due_date_priority": 999999,
+  "warehouse_name": "WAREHOUSE ESHTAOL",
+  "warehouse_address": "Eshtaol, Israel"
+}
