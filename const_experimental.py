@@ -46,6 +46,17 @@ class StageResult:
     notes: list[str] = field(default_factory=list)
 
 
+@dataclass
+class SmartSelectionEstimate:
+    selected_count: int
+    city_count: int
+    load_count: int
+    estimated_driver_times: list[float]
+    estimated_total_minutes: float
+    fits: bool
+    safety_limit: float
+
+
 def load_env_file(env_path: Path = ROOT / ".env") -> None:
     if not env_path.exists():
         return
@@ -62,6 +73,7 @@ def import_script(path: Path, module_name: str) -> Any:
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Cannot import {path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -184,6 +196,202 @@ def mock_distance_matrix(full_addresses: list[str], coords_dict: dict[str, Any])
     return pd.DataFrame(matrix_data, index=full_addresses, columns=full_addresses)
 
 
+def address_cache_id(address: str) -> str:
+    normalized = re.sub(r"\s+", " ", str(address or "").strip()).casefold()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+
+def distance_pair_cache_paths() -> list[Path]:
+    return [
+        CONST_MOCK_DATA_DIR / "distance_pair_cache.xlsx",
+        MOCK_DATA_DIR / "distance_pair_cache.xlsx",
+    ]
+
+
+def load_distance_pair_cache() -> dict[tuple[str, str], dict[str, Any]]:
+    cache: dict[tuple[str, str], dict[str, Any]] = {}
+    for path in distance_pair_cache_paths():
+        if not path.exists():
+            continue
+        df = pd.read_excel(path).fillna("")
+        for _, row in df.iterrows():
+            origin = str(row.get("origin_address", "")).strip()
+            destination = str(row.get("destination_address", "")).strip()
+            minutes = pd.to_numeric(row.get("duration_minutes"), errors="coerce")
+            if origin and destination and pd.notna(minutes):
+                cache[(origin, destination)] = row.to_dict()
+    return cache
+
+
+def pair_cache_row(
+    origin: str,
+    destination: str,
+    duration_minutes: int,
+    source: str,
+    distance_meters: Any = "",
+) -> dict[str, Any]:
+    return {
+        "origin_id": address_cache_id(origin),
+        "destination_id": address_cache_id(destination),
+        "origin_address": origin,
+        "destination_address": destination,
+        "duration_minutes": int(duration_minutes),
+        "distance_meters": distance_meters,
+        "source": source,
+        "calculated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def merge_distance_pair_cache_rows(existing: pd.DataFrame, updates: pd.DataFrame) -> pd.DataFrame:
+    if existing.empty:
+        merged = updates.copy()
+    elif updates.empty:
+        merged = existing.copy()
+    else:
+        merged = pd.concat([existing, updates], ignore_index=True)
+    if merged.empty:
+        return merged
+    return merged.drop_duplicates(
+        subset=["origin_address", "destination_address"],
+        keep="last",
+    ).sort_values(["origin_address", "destination_address"], kind="stable")
+
+
+def save_distance_pair_cache_updates(run_dir: Path, rows: list[dict[str, Any]]) -> Path | None:
+    if not rows:
+        return None
+    path = run_dir / "05_distance_pair_cache_updates.xlsx"
+    pd.DataFrame(rows).to_excel(path, index=False)
+    return path
+
+
+def seed_pair_cache_from_matrix(
+    matrix_path: Path,
+    full_addresses: list[str],
+    pair_cache: dict[tuple[str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not matrix_path.exists():
+        return []
+    matrix_df = pd.read_excel(matrix_path, index_col=0)
+    updates: list[dict[str, Any]] = []
+    for origin in full_addresses:
+        if origin not in matrix_df.index:
+            continue
+        for destination in full_addresses:
+            if origin == destination or destination not in matrix_df.columns:
+                continue
+            if (origin, destination) in pair_cache:
+                continue
+            minutes = pd.to_numeric(matrix_df.loc[origin, destination], errors="coerce")
+            if pd.isna(minutes):
+                continue
+            update = pair_cache_row(origin, destination, int(minutes), "group-matrix-cache")
+            pair_cache[(origin, destination)] = update
+            updates.append(update)
+    return updates
+
+
+def build_matrix_with_pair_cache(
+    full_addresses: list[str],
+    coords_dict: dict[str, Any],
+    api_key: str,
+    allow_api: bool,
+    pair_cache: dict[tuple[str, str], dict[str, Any]],
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    matrix_data = []
+    updates: list[dict[str, Any]] = []
+    destination_chunk_size = 25
+
+    for i, origin in enumerate(full_addresses):
+        row_minutes = [999] * len(full_addresses)
+        row_minutes[i] = 0
+        origin_coords = coords_dict.get(origin)
+
+        for start in range(0, len(full_addresses), destination_chunk_size):
+            dest_addresses = full_addresses[start : start + destination_chunk_size]
+            api_destinations = []
+            api_positions = []
+            api_estimates: dict[int, int] = {}
+
+            for offset, destination in enumerate(dest_addresses):
+                j = start + offset
+                if i == j:
+                    continue
+                cached = pair_cache.get((origin, destination))
+                if cached:
+                    row_minutes[j] = int(pd.to_numeric(cached.get("duration_minutes"), errors="coerce"))
+                    continue
+
+                dest_coords = coords_dict.get(destination)
+                estimated = 999
+                if origin_coords and dest_coords:
+                    estimated = mock_distance_matrix([origin, destination], coords_dict).iloc[0, 1]
+                    estimated = int(estimated)
+                if not allow_api:
+                    row_minutes[j] = estimated
+                    update = pair_cache_row(origin, destination, estimated, "mock-estimated")
+                    pair_cache[(origin, destination)] = update
+                    updates.append(update)
+                    continue
+
+                if not origin_coords or not dest_coords:
+                    row_minutes[j] = estimated
+                    update = pair_cache_row(origin, destination, estimated, "missing-coordinates")
+                    pair_cache[(origin, destination)] = update
+                    updates.append(update)
+                    continue
+
+                row_minutes[j] = estimated
+                api_estimates[j] = estimated
+                api_destinations.append(f"{dest_coords['lat']},{dest_coords['lng']}")
+                api_positions.append(j)
+
+            if not allow_api or not api_destinations or not origin_coords:
+                continue
+
+            dm_params = {
+                "origins": f"{origin_coords['lat']},{origin_coords['lng']}",
+                "destinations": "|".join(api_destinations),
+                "mode": "driving",
+                "departure_time": "now",
+                "key": api_key,
+            }
+            try:
+                dm_res = requests.get(
+                    "https://maps.googleapis.com/maps/api/distancematrix/json",
+                    params=dm_params,
+                    timeout=30,
+                ).json()
+                if dm_res.get("status") == "OK":
+                    elements = dm_res["rows"][0]["elements"]
+                    for dest_index, element in zip(api_positions, elements):
+                        destination = full_addresses[dest_index]
+                        minutes = api_estimates.get(dest_index, row_minutes[dest_index])
+                        meters: Any = ""
+                        source = "google"
+                        if element.get("status") == "OK":
+                            seconds = element.get("duration_in_traffic", element["duration"])["value"]
+                            minutes = round(seconds / 60)
+                            meters = element.get("distance", {}).get("value", "")
+                        else:
+                            source = "google-fallback-estimated"
+                        row_minutes[dest_index] = minutes
+                        update = pair_cache_row(origin, destination, minutes, source, meters)
+                        pair_cache[(origin, destination)] = update
+                        updates.append(update)
+            except Exception:
+                for dest_index in api_positions:
+                    destination = full_addresses[dest_index]
+                    minutes = api_estimates.get(dest_index, row_minutes[dest_index])
+                    update = pair_cache_row(origin, destination, minutes, "api-error-estimated")
+                    pair_cache[(origin, destination)] = update
+                    updates.append(update)
+
+        matrix_data.append(row_minutes)
+
+    return pd.DataFrame(matrix_data, index=full_addresses, columns=full_addresses), updates
+
+
 def load_mock_geocode_cache() -> dict[tuple[str, str], dict[str, Any]]:
     path = CONST_MOCK_DATA_DIR / "geocoding_cache.xlsx"
     if not path.exists():
@@ -277,6 +485,14 @@ def save_real_mock_data(run_dir: Path) -> list[Path]:
         target = matrix_dir / matrix_path.name
         pd.read_excel(matrix_path, index_col=0).to_excel(target)
         saved_paths.append(target)
+
+    pair_updates_path = run_dir / "05_distance_pair_cache_updates.xlsx"
+    if pair_updates_path.exists():
+        pair_target = target_dir / "distance_pair_cache.xlsx"
+        existing = pd.read_excel(pair_target).fillna("") if pair_target.exists() else pd.DataFrame()
+        updates = pd.read_excel(pair_updates_path).fillna("")
+        merge_distance_pair_cache_rows(existing, updates).to_excel(pair_target, index=False)
+        saved_paths.append(pair_target)
 
     origin_source = run_dir / "06_origin_duration_cache.xlsx"
     if origin_source.exists():
@@ -549,10 +765,8 @@ def package_count_from_row(row: pd.Series) -> int:
 def select_orders_for_current_run(
     df: pd.DataFrame, run_dir: Path, args: argparse.Namespace
 ) -> tuple[pd.DataFrame, pd.DataFrame, Path, Path]:
-    sorted_df = sort_orders_for_selection(df, args)
     capacity = initial_selection_capacity(args)
-    selected = sorted_df.head(capacity)
-    deferred = sorted_df.iloc[capacity:]
+    selected, deferred = split_orders_by_priority_and_closeness(df, capacity, args)
     selected_path = run_dir / "02b_selected_orders_for_run.xlsx"
     deferred_path = run_dir / "02c_deferred_orders_next_run.xlsx"
     selected.to_excel(selected_path, index=False)
@@ -578,6 +792,167 @@ def sort_orders_for_selection(df: pd.DataFrame, args: argparse.Namespace) -> pd.
     return sorted_df.drop(columns=["_selection_order", "_parsed_required_delivery_date"])
 
 
+def normalize_selection_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+
+def location_key(row: pd.Series) -> tuple[str, str]:
+    return (
+        normalize_selection_text(row.get("City", "")),
+        normalize_selection_text(row.get("Street_Name", "")),
+    )
+
+
+def city_key(row: pd.Series) -> str:
+    return normalize_selection_text(row.get("City", ""))
+
+
+def append_candidate_indices(
+    chosen: list[Any],
+    chosen_set: set[Any],
+    candidate_indices: list[Any],
+    remaining: int,
+) -> int:
+    for index in candidate_indices:
+        if remaining <= 0:
+            break
+        if index in chosen_set:
+            continue
+        chosen.append(index)
+        chosen_set.add(index)
+        remaining -= 1
+    return remaining
+
+
+def choose_priority_zero_locality(priority_df: pd.DataFrame, remaining: int) -> list[Any]:
+    chosen: list[Any] = []
+    chosen_set: set[Any] = set()
+    city_order: list[str] = []
+    for _, row in priority_df.iterrows():
+        city = city_key(row)
+        if city not in city_order:
+            city_order.append(city)
+
+    for city in city_order:
+        city_df = priority_df[priority_df.apply(city_key, axis=1) == city]
+        street_order: list[str] = []
+        for _, row in city_df.iterrows():
+            street = location_key(row)[1]
+            if street not in street_order:
+                street_order.append(street)
+        for street in street_order:
+            block_indices = [
+                index
+                for index, row in city_df.iterrows()
+                if location_key(row)[1] == street
+            ]
+            remaining = append_candidate_indices(chosen, chosen_set, block_indices, remaining)
+            if remaining <= 0:
+                return chosen
+    return chosen
+
+
+def distance_to_selected(row: pd.Series, selected_df: pd.DataFrame) -> float:
+    lat = pd.to_numeric(row.get("LAT"), errors="coerce")
+    lng = pd.to_numeric(row.get("LNG"), errors="coerce")
+    if pd.isna(lat) or pd.isna(lng):
+        return float("inf")
+    best = float("inf")
+    for _, selected_row in selected_df.iterrows():
+        selected_lat = pd.to_numeric(selected_row.get("LAT"), errors="coerce")
+        selected_lng = pd.to_numeric(selected_row.get("LNG"), errors="coerce")
+        if pd.isna(selected_lat) or pd.isna(selected_lng):
+            continue
+        best = min(best, calculate_haversine(lat, lng, selected_lat, selected_lng))
+    return best
+
+
+def choose_local_to_selected(
+    priority_df: pd.DataFrame,
+    selected_df: pd.DataFrame,
+    remaining: int,
+) -> list[Any]:
+    if selected_df.empty:
+        return choose_priority_zero_locality(priority_df, remaining)
+
+    chosen: list[Any] = []
+    chosen_set: set[Any] = set()
+    selected_location_order: list[tuple[str, str]] = []
+    selected_city_order: list[str] = []
+    for _, row in selected_df.iterrows():
+        loc = location_key(row)
+        city = loc[0]
+        if loc not in selected_location_order:
+            selected_location_order.append(loc)
+        if city not in selected_city_order:
+            selected_city_order.append(city)
+
+    for loc in selected_location_order:
+        indices = [
+            index
+            for index, row in priority_df.iterrows()
+            if location_key(row) == loc
+        ]
+        remaining = append_candidate_indices(chosen, chosen_set, indices, remaining)
+        if remaining <= 0:
+            return chosen
+
+    for city in selected_city_order:
+        city_df = priority_df[priority_df.apply(city_key, axis=1) == city]
+        street_order: list[str] = []
+        for _, row in city_df.iterrows():
+            street = location_key(row)[1]
+            if street not in street_order:
+                street_order.append(street)
+        for street in street_order:
+            indices = [
+                index
+                for index, row in city_df.iterrows()
+                if location_key(row)[1] == street
+            ]
+            remaining = append_candidate_indices(chosen, chosen_set, indices, remaining)
+            if remaining <= 0:
+                return chosen
+
+    nearest_indices = sorted(
+        [index for index in priority_df.index if index not in chosen_set],
+        key=lambda index: distance_to_selected(priority_df.loc[index], selected_df),
+    )
+    remaining = append_candidate_indices(chosen, chosen_set, nearest_indices, remaining)
+    if remaining <= 0:
+        return chosen
+
+    remaining_indices = [index for index in priority_df.index if index not in chosen_set]
+    append_candidate_indices(chosen, chosen_set, remaining_indices, remaining)
+    return chosen
+
+
+def split_orders_by_priority_and_closeness(
+    df: pd.DataFrame, selected_count: int, args: argparse.Namespace
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    ordered_df = sort_orders_for_selection(df, args)
+    selected_count = max(1, min(int(selected_count), len(ordered_df))) if len(ordered_df) else 0
+    selected_indices: list[Any] = []
+
+    for priority in ordered_df["delivery_priority"].drop_duplicates().tolist():
+        if len(selected_indices) >= selected_count:
+            break
+        priority_df = ordered_df[ordered_df["delivery_priority"] == priority]
+        remaining = selected_count - len(selected_indices)
+        if len(priority_df) <= remaining:
+            selected_indices.extend(priority_df.index.tolist())
+            continue
+        selected_so_far = ordered_df.loc[selected_indices] if selected_indices else ordered_df.iloc[0:0]
+        selected_indices.extend(choose_local_to_selected(priority_df, selected_so_far, remaining))
+        break
+
+    selected_set = set(selected_indices)
+    deferred_indices = [index for index in ordered_df.index if index not in selected_set]
+    selected = ordered_df.loc[selected_indices].reset_index(drop=True)
+    deferred = ordered_df.loc[deferred_indices].reset_index(drop=True)
+    return selected, deferred
+
+
 def initial_selection_capacity(args: argparse.Namespace) -> int:
     return int(
         int(constraint_value(args, "drivers", 3))
@@ -586,117 +961,326 @@ def initial_selection_capacity(args: argparse.Namespace) -> int:
     )
 
 
-def stage_1_cleanup(input_path: Path, run_dir: Path, args: argparse.Namespace) -> tuple[Path, StageResult]:
-    cleanup = import_script(ROOT / "data.cleanup.experimental.py", "routecraft_data_cleanup_experimental")
-    df = pd.read_excel(input_path).fillna("")
-    city_col = find_raw_col(df, "City", "site name", "site_name")
-    street_col = find_raw_col(df, "Street_Name", "street name", "ship to street 1", "ship_to_street1")
-    number_col = find_raw_col(df, "House_Number", "house number", "building number", "ship to street 2", "ship_to_street2")
-    has_raw_shipping_cols = all(
-        find_raw_col(df, name) for name in ["ship_to_city", "ship_to_street1", "ship_to_street2"]
+def constraint_bool(args: argparse.Namespace, name: str, default: bool) -> bool:
+    value = constraint_value(args, name, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def air_drive_minutes_between(
+    lat1: Any,
+    lng1: Any,
+    lat2: Any,
+    lng2: Any,
+    args: argparse.Namespace,
+) -> float:
+    meters = calculate_haversine(lat1, lng1, lat2, lng2)
+    drive_multiplier = float(constraint_value(args, "air_distance_drive_multiplier", 1.35))
+    return (meters * drive_multiplier) / (42 * 1000 / 60)
+
+
+def estimate_city_centroids(selected: pd.DataFrame) -> dict[str, dict[str, Any]]:
+    cities: dict[str, dict[str, Any]] = {}
+    for _, row in selected.iterrows():
+        city = clean_cell(row.get("City", ""))
+        lat = pd.to_numeric(row.get("LAT"), errors="coerce")
+        lng = pd.to_numeric(row.get("LNG"), errors="coerce")
+        if not city or pd.isna(lat) or pd.isna(lng):
+            continue
+        entry = cities.setdefault(city, {"lat_values": [], "lng_values": [], "count": 0})
+        entry["lat_values"].append(float(lat))
+        entry["lng_values"].append(float(lng))
+        entry["count"] += 1
+    for entry in cities.values():
+        entry["lat"] = sum(entry["lat_values"]) / len(entry["lat_values"])
+        entry["lng"] = sum(entry["lng_values"]) / len(entry["lng_values"])
+    return cities
+
+
+def city_sequence_for_rows(rows: pd.DataFrame) -> list[str]:
+    sequence: list[str] = []
+    for _, row in rows.iterrows():
+        city = clean_cell(row.get("City", ""))
+        if city and city not in sequence:
+            sequence.append(city)
+    return sequence
+
+
+def estimate_load_minutes(
+    load_rows: pd.DataFrame,
+    city_centroids: dict[str, dict[str, Any]],
+    warehouse: dict[str, Any],
+    args: argparse.Namespace,
+) -> float:
+    service_minutes = float(constraint_value(args, "service_minutes_per_package", 4))
+    city_stop_minutes = float(constraint_value(args, "estimated_city_stop_minutes", 3))
+    service_time = len(load_rows) * service_minutes
+    city_sequence = city_sequence_for_rows(load_rows)
+    if not city_sequence:
+        return service_time
+
+    travel_time = 0.0
+    previous_lat = float(warehouse["lat"])
+    previous_lng = float(warehouse["lng"])
+    for city in city_sequence:
+        centroid = city_centroids.get(city)
+        if not centroid:
+            continue
+        travel_time += air_drive_minutes_between(previous_lat, previous_lng, centroid["lat"], centroid["lng"], args)
+        previous_lat = float(centroid["lat"])
+        previous_lng = float(centroid["lng"])
+        city_rows = load_rows[load_rows["City"].astype(str).eq(str(city))]
+        travel_time += max(0, len(city_rows) - 1) * city_stop_minutes
+    travel_time += air_drive_minutes_between(previous_lat, previous_lng, warehouse["lat"], warehouse["lng"], args)
+    return service_time + travel_time
+
+
+def estimate_selected_rows(
+    ordered_orders: pd.DataFrame,
+    selected_count: int,
+    args: argparse.Namespace,
+    warehouse: dict[str, Any],
+) -> SmartSelectionEstimate:
+    selected, _deferred = split_orders_by_priority_and_closeness(ordered_orders, selected_count, args)
+    drivers = max(1, int(constraint_value(args, "drivers", 3)))
+    max_packages = max(1, int(constraint_value(args, "max_packages_per_driver", 100)))
+    max_shift = float(constraint_value(args, "max_shift_minutes", 720))
+    safety = float(constraint_value(args, "smart_estimate_safety_buffer", 0.9))
+    safety_limit = max_shift * safety
+    city_centroids = estimate_city_centroids(selected)
+    driver_times = [0.0 for _ in range(drivers)]
+    load_count = 0
+
+    for start in range(0, len(selected), max_packages):
+        load_rows = selected.iloc[start : start + max_packages]
+        if load_rows.empty:
+            continue
+        load_count += 1
+        load_minutes = estimate_load_minutes(load_rows, city_centroids, warehouse, args)
+        driver_index = min(range(drivers), key=lambda index: driver_times[index])
+        driver_times[driver_index] += load_minutes
+
+    fits = bool(driver_times) and max(driver_times) <= safety_limit
+    return SmartSelectionEstimate(
+        selected_count=len(selected),
+        city_count=len(city_centroids),
+        load_count=load_count,
+        estimated_driver_times=driver_times,
+        estimated_total_minutes=sum(driver_times),
+        fits=fits,
+        safety_limit=safety_limit,
     )
-    if city_col and street_col and number_col and not has_raw_shipping_cols:
-        rows = []
-        failed_rows = []
-        for source_index, row in df.iterrows():
-            city = clean_cell(row.get(city_col, ""))
-            street = clean_cell(row.get(street_col, ""))
-            house_number = clean_cell(row.get(number_col, "")).replace(".0", "")
-            valid, status = cleanup.validate_components(city, street, house_number)
-            result = row.to_dict()
-            result.update(
+
+
+def find_smart_initial_selection_count(
+    ordered_orders: pd.DataFrame,
+    args: argparse.Namespace,
+    warehouse: dict[str, Any],
+) -> tuple[int, SmartSelectionEstimate]:
+    if ordered_orders.empty:
+        raise RuntimeError("Smart selection has no orders to estimate.")
+    low = 1
+    high = len(ordered_orders)
+    best_count = 1
+    best_estimate = estimate_selected_rows(ordered_orders, 1, args, warehouse)
+    last_estimate = best_estimate
+
+    while low <= high:
+        mid = (low + high) // 2
+        estimate = estimate_selected_rows(ordered_orders, mid, args, warehouse)
+        last_estimate = estimate
+        if estimate.fits:
+            best_count = mid
+            best_estimate = estimate
+            low = mid + 1
+        else:
+            high = mid - 1
+
+    if not best_estimate.fits:
+        return min(initial_selection_capacity(args), len(ordered_orders)), last_estimate
+    return best_count, best_estimate
+
+
+def smart_estimate_notes(estimate: SmartSelectionEstimate, label: str = "Smart initial estimate") -> list[str]:
+    times = ", ".join(f"{minutes:.0f}" for minutes in estimate.estimated_driver_times)
+    return [
+        f"{label}: selected {estimate.selected_count} rows across {estimate.city_count} cities.",
+        f"Estimated loads: {estimate.load_count}; estimated driver minutes: [{times}]; safety limit per driver: {estimate.safety_limit:.0f}.",
+    ]
+
+
+def stage_1_cleanup(input_path: Path, run_dir: Path, args: argparse.Namespace) -> tuple[Path, StageResult]:
+    cleanup = import_script(ROOT / "address_parser_experimental.py", "routecraft_address_parser_experimental")
+    df = pd.read_excel(input_path, dtype=str).fillna("")
+    columns = cleanup.resolve_columns(df)
+    direct_city_col = find_raw_col(df, "City", "city", "site name", "site_name")
+    direct_street_col = find_raw_col(df, "Street_Name", "street name")
+    direct_number_col = find_raw_col(df, "House_Number", "house number", "building number")
+    if "ship_to_city" not in columns and direct_city_col:
+        columns["ship_to_city"] = direct_city_col
+    if "ship_to_street1" not in columns and direct_street_col:
+        columns["ship_to_street1"] = direct_street_col
+    if "ship_to_street2" not in columns and direct_number_col:
+        columns["ship_to_street2"] = direct_number_col
+    missing = [name for name in ["ship_to_city", "ship_to_street1"] if name not in columns]
+    if missing:
+        raise RuntimeError(f"Stage 1 input is missing address columns: {', '.join(missing)}")
+
+    good_rows: list[dict[str, Any]] = []
+    original_rows: list[dict[str, Any]] = []
+    failed_rows: list[dict[str, Any]] = []
+    use_skill = not constraint_bool(args, "disable_address_skill", False)
+    for idx, row in df.iterrows():
+        source_row = idx + 2
+        city = row.get(columns["ship_to_city"], "")
+        street1 = row.get(columns["ship_to_street1"], "")
+        street2 = row.get(columns.get("ship_to_street2", ""), "")
+        if direct_city_col and direct_street_col and direct_number_col:
+            city = row.get(direct_city_col, city)
+            street1 = " ".join(
+                part
+                for part in [
+                    clean_cell(row.get(direct_street_col, "")),
+                    clean_cell(row.get(direct_number_col, "")),
+                ]
+                if part
+            )
+            street2 = ""
+        cleaned = cleanup.clean_raw_address(city, street1, street2, use_skill=use_skill)
+        required_delivery_date = row.get(columns.get("required_delivery_date", ""), "")
+        comments = row.get(columns.get("comments", ""), "")
+        base_result = row.to_dict()
+        base_result.update(
+            {
+                "order_id": row.get(columns.get("order_id", ""), ""),
+                "client_id": row.get(columns.get("client_id", ""), ""),
+                "site_id": row.get(columns.get("site_id", ""), ""),
+                "source_row": source_row,
+                "City": cleaned.city,
+                "Street_Name": cleaned.street,
+                "House_Number": cleaned.house_number,
+                "Apartment": cleaned.apartment,
+                "Floor": cleaned.floor,
+                "Entrance": cleaned.entrance,
+                "Comments": comments,
+                "Secondary_Notes": cleaned.secondary_notes,
+                "Secondary_Classification": cleaned.secondary_classification,
+                "Needs_Review": "yes" if cleaned.needs_review else "no",
+                "original_city": clean_cell(city),
+                "original_street1": clean_cell(street1),
+                "original_street2": clean_cell(street2),
+                "required_delivery_date": required_delivery_date,
+                "merged_address": cleaned.merged_address,
+                "cleaned_address": cleaned.cleaned_address,
+                "cleanup_status": cleaned.status,
+                "Confidence": cleaned.confidence,
+                "ParserOutput": cleaned.parser_output,
+            }
+        )
+        if cleaned.is_valid:
+            good_rows.append(
                 {
-                    "source_row": source_index + 2,
-                    "City": city,
-                    "Street_Name": street,
-                    "House_Number": house_number,
-                    "cleanup_status": status,
+                    "City": cleaned.city,
+                    "Street_Name": cleaned.street,
+                    "House_Number": cleaned.house_number,
+                    "source_row": source_row,
+                    "order_id": base_result["order_id"],
+                    "client_id": base_result["client_id"],
+                    "site_id": base_result["site_id"],
+                    "Apartment": cleaned.apartment,
+                    "Floor": cleaned.floor,
+                    "Entrance": cleaned.entrance,
+                    "Comments": comments,
+                    "original_city": clean_cell(city),
+                    "original_street1": clean_cell(street1),
+                    "original_street2": clean_cell(street2),
+                    "required_delivery_date": required_delivery_date,
+                    "merged_address": cleaned.merged_address,
+                    "cleaned_address": cleaned.cleaned_address,
+                    "cleanup_status": cleaned.status,
+                    "Confidence": cleaned.confidence,
+                    "Needs_Review": "yes" if cleaned.needs_review else "no",
                 }
             )
-            if valid:
-                rows.append(result)
-            else:
-                failed_rows.append(result)
-        good_df = pd.DataFrame(rows)
-        failed_df = pd.DataFrame(failed_rows)
-        shaped_df = good_df.copy()
-        lead_cols = ["City", "Street_Name", "House_Number"]
-        shaped_df = shaped_df[lead_cols + [col for col in shaped_df.columns if col not in lead_cols]]
+            original_rows.append(base_result)
+        else:
+            failed_rows.append(base_result)
 
-        failed_path = run_dir / "01a_failed_addresses.xlsx"
-        shaped_path = run_dir / "01b_addresses_for_geocoding.xlsx"
-        original_path = run_dir / "01c_good_orders_original_format.xlsx"
-        failed_df.to_excel(failed_path, index=False)
-        shaped_df.to_excel(shaped_path, index=False)
-        good_df.to_excel(original_path, index=False)
-    else:
-        paths = cleanup.clean_raw_orders(input_path, run_dir)
-        failed_path = paths["failed"]
-        shaped_path = paths["good_addresses"]
-        original_path = paths["good_original"]
-        due_col = find_raw_col(df, "required_delivery_date", "required delivery date")
-        if due_col:
-            original_df = pd.read_excel(original_path).fillna("")
-            source_due = df[[due_col]].copy()
-            source_due["source_row"] = source_due.index + 2
-            if "required_delivery_date" not in original_df.columns:
-                merged = original_df.merge(source_due, on="source_row", how="left")
-                merged = merged.rename(columns={due_col: "required_delivery_date"})
-            else:
-                merged = original_df
-            merged.to_excel(original_path, index=False)
-            shaped_df = pd.read_excel(shaped_path).fillna("")
-            if "source_row" not in shaped_df.columns:
-                shaped_df = shaped_df.reset_index(drop=True)
-                shaped_df["source_row"] = merged["source_row"].values[: len(shaped_df)]
-            if "required_delivery_date" not in shaped_df.columns:
-                shaped_df = shaped_df.merge(
-                    source_due.rename(columns={due_col: "required_delivery_date"}),
-                    on="source_row",
-                    how="left",
-                )
-            shaped_df.to_excel(shaped_path, index=False)
+    failed_path = run_dir / "01a_failed_addresses.xlsx"
+    shaped_path = run_dir / "01b_addresses_for_geocoding.xlsx"
+    original_path = run_dir / "01c_good_orders_original_format.xlsx"
+    stage_1_columns = [
+        "City",
+        "Street_Name",
+        "House_Number",
+        "source_row",
+        "required_delivery_date",
+    ]
+    pd.DataFrame(failed_rows).to_excel(failed_path, index=False)
+    pd.DataFrame(good_rows).reindex(columns=stage_1_columns).to_excel(shaped_path, index=False)
+    pd.DataFrame(original_rows).to_excel(original_path, index=False)
 
     return shaped_path, StageResult(
         1,
-        "Clean raw order addresses",
+        "Smart clean raw order addresses",
         "completed",
         [failed_path, shaped_path, original_path],
         [
-            "Deleted required delivery date, grouped by city, merged ship_to_street1/2, "
-            "and wrote failed, flow-ready, and original-format good-address files."
+            f"Smart Israeli parser cleaned {len(good_rows)} rows; {len(failed_rows)} rows require review."
         ],
     )
 
 
 def stage_2_geocode(input_path: Path, run_dir: Path, args: argparse.Namespace) -> tuple[Path, StageResult]:
+    smart_address = import_script(ROOT / "address_parser_experimental.py", "routecraft_address_parser_experimental_stage2")
     google_key = "" if args.mock_google else get_google_key(args)
-    geocode_cache = load_mock_geocode_cache()
     df = pd.read_excel(input_path)
     if df.shape[1] < 3:
         raise RuntimeError("Stage 2 input must have at least 3 columns: city, street, house number.")
 
-    city_col, street_col, number_col = df.columns[:3]
     rows = []
     failed_rows = []
     geocode_cache_rows = []
     for _, row in df.iterrows():
-        city = clean_cell(row[city_col])
-        street = clean_cell(row[street_col])
-        house_number = clean_cell(row[number_col])
-        query = f"{street} {house_number}, {city}".strip()
-        cached = geocode_cache.get((query, city))
-        if cached:
-            lat = cached.get("lat")
-            lng = cached.get("lng")
-            is_precise = bool(cached.get("is_precise", True))
-            status = str(cached.get("status", "cached precise match"))
-        elif args.mock_google:
-                lat, lng = mock_lat_lng(query)
-                is_precise = True
-                status = "mock precise match"
+        city = clean_cell(row.get("City", ""))
+        street = clean_cell(row.get("Street_Name", ""))
+        house_number = clean_cell(row.get("House_Number", ""))
+        cleaned_address = clean_cell(row.get("cleaned_address", "")) or f"{street} {house_number}".strip()
+        query = f"{cleaned_address}, {city}".strip(" ,")
+        if args.mock_google:
+            lat, lng = mock_lat_lng(query)
+            geocode_result = {
+                "LAT": lat,
+                "LNG": lng,
+                "Coordinates": f"{lat},{lng}",
+                "Geocode_Query": query,
+                "Geocode_Status": "mock precise match",
+                "Geocode_Precise": "yes",
+                "Geocode_Usable": "yes",
+                "Geocode_Formatted": query,
+                "Geocode_Attempt_Count": 0,
+                "Geocode_Query_Used": query,
+                "Geocode_Result_Types": "mock",
+                "Geocode_Location_Type": "MOCK",
+                "Geocode_Diagnostic_Coordinates": "",
+                "Geocode_Source": "mock",
+                "Geocode_Estimated": "no",
+                "Geocode_Failure_Reason": "",
+                "Google_Street": "",
+                "Google_House_Number": "",
+                "Google_City": "",
+            }
         else:
-            lat, lng, is_precise, status = geocode_precise_address(query, google_key, city)
+            geocode_result = smart_address.geocode_address(
+                cleaned_address,
+                city,
+                google_key,
+                street=street,
+                house_number=house_number,
+            )
 
         geocode_cache_rows.append(
             {
@@ -704,60 +1288,89 @@ def stage_2_geocode(input_path: Path, run_dir: Path, args: argparse.Namespace) -
                 "city": city,
                 "street": street,
                 "house_number": house_number,
-                "lat": lat,
-                "lng": lng,
-                "is_precise": is_precise,
-                "status": status,
+                "lat": geocode_result.get("LAT", ""),
+                "lng": geocode_result.get("LNG", ""),
+                "is_precise": clean_cell(geocode_result.get("Geocode_Usable", "")).lower() in {"yes", "review"},
+                "status": geocode_result.get("Geocode_Status", ""),
+                **geocode_result,
             }
         )
-
-        if not is_precise:
-            failed_rows.append(
-                {
-                    "City": city,
-                    "Street_Name": street,
-                    "House_Number": house_number,
-                    "merged_address": query,
-                    "cleanup_status": status,
-                }
-            )
-            continue
 
         rows.append(
             {
                 "City": city,
                 "Street_Name": street,
                 "House_Number": house_number,
-                "LAT": lat,
-                "LNG": lng,
-                "geocode_status": status,
-                **{
-                    str(col): row.get(col)
-                    for col in df.columns[3:]
-                    if str(col) not in {"LAT", "LNG", "geocode_status"}
-                },
+                "source_row": row.get("source_row", ""),
+                "required_delivery_date": row.get("required_delivery_date", ""),
+                **geocode_result,
+            }
+        )
+
+    if not args.mock_google:
+        smart_address.estimate_failed_geocodes_from_neighbors(rows)
+
+    route_ready_rows = []
+    for row_data in rows:
+        if not smart_address.is_route_ready(row_data):
+            failed_rows.append(
+                {
+                    "City": row_data.get("City", ""),
+                    "Street_Name": row_data.get("Street_Name", ""),
+                    "House_Number": row_data.get("House_Number", ""),
+                    "merged_address": row_data.get("Geocode_Query", ""),
+                    "cleanup_status": row_data.get("Geocode_Failure_Reason", "") or row_data.get("Geocode_Status", ""),
+                    **row_data,
+                }
+            )
+            continue
+        google_street = clean_cell(row_data.get("Google_Street", ""))
+        google_house_number = clean_cell(row_data.get("Google_House_Number", ""))
+        if clean_cell(row_data.get("Geocode_Usable", "")).lower() == "yes":
+            if google_street:
+                row_data["Street_Name"] = google_street
+            if google_house_number:
+                row_data["House_Number"] = google_house_number
+        route_ready_rows.append(
+            {
+                "City": row_data.get("City", ""),
+                "Street_Name": row_data.get("Street_Name", ""),
+                "House_Number": row_data.get("House_Number", ""),
+                "LAT": row_data.get("LAT", ""),
+                "LNG": row_data.get("LNG", ""),
+                "geocode_status": row_data.get("Geocode_Status", ""),
+                "source_row": row_data.get("source_row", ""),
+                "required_delivery_date": row_data.get("required_delivery_date", ""),
             }
         )
 
     output_path = run_dir / "02_geocoded_addresses.xlsx"
-    if not rows:
+    if not route_ready_rows:
         record_geocode_failures(run_dir, failed_rows)
-        raise RuntimeError("Stage 2 did not find any addresses with precise Google geocoding matches.")
+        raise RuntimeError("Stage 2 did not find any route-ready geocoded addresses.")
 
-    geocoded_df = pd.DataFrame(rows)
-    selected_df, deferred_df, selected_path, deferred_path = select_orders_for_current_run(geocoded_df, run_dir, args)
+    geocoded_df = pd.DataFrame(route_ready_rows)
     geocoded_df.to_excel(output_path, index=False)
     if geocode_cache_rows:
         pd.DataFrame(geocode_cache_rows).to_excel(run_dir / "02_geocoding_cache.xlsx", index=False)
     failure_path = record_geocode_failures(run_dir, failed_rows)
-    output_files = [output_path, selected_path, deferred_path, run_dir / "02_geocoding_cache.xlsx"] + ([failure_path] if failure_path else [])
+    output_files = [output_path, run_dir / "02_geocoding_cache.xlsx"] + ([failure_path] if failure_path else [])
     notes = []
-    notes.append(f"Selected {len(selected_df)} orders for this run; deferred {len(deferred_df)} orders for next run.")
+    if args.disable_iterative_delivery:
+        selected_df, deferred_df, selected_path, deferred_path = select_orders_for_current_run(geocoded_df, run_dir, args)
+        output_files.extend([selected_path, deferred_path])
+        notes.append(f"Selected {len(selected_df)} orders for this run; deferred {len(deferred_df)} orders for next run.")
+        current = selected_path
+    else:
+        notes.append(
+            "Wrote geocoded addresses; iterative search will create selected/deferred files inside each attempt folder."
+        )
+        current = output_path
     if failed_rows:
         notes.append(
-            f"{len(failed_rows)} addresses were moved to the error file because Google could not accurately find them."
+            f"{len(failed_rows)} addresses were moved to the error file because they were not route-ready."
         )
-    return selected_path, StageResult(2, "Geocode addresses and select loadable orders", "completed", output_files, notes)
+    return current, StageResult(2, "Smart geocode addresses", "completed", output_files, notes)
 
 
 def stage_3_cluster(input_path: Path, run_dir: Path, args: argparse.Namespace) -> tuple[Path, StageResult]:
@@ -900,7 +1513,6 @@ def stage_5_distance_matrices(input_path: Path, run_dir: Path, args: argparse.Na
     if args.mock_google:
         distance.API_KEY = "mock-google"
         distance.get_coords = mock_coords_from_cache
-        distance.build_matrix_for_addresses = mock_distance_matrix
     else:
         distance.API_KEY = get_distance_key(args)
 
@@ -944,23 +1556,31 @@ def stage_5_distance_matrices(input_path: Path, run_dir: Path, args: argparse.Na
     coords_cache_path = run_dir / "05_distance_coords_cache.xlsx"
     pd.DataFrame(coords_rows).to_excel(coords_cache_path, index=False)
 
+    pair_cache = load_distance_pair_cache()
+    pair_cache_updates: list[dict[str, Any]] = []
     matrix_paths = []
     for group_value, group_df in grouped_frames.items():
         full_addresses = distance.build_full_addresses(group_df)
         safe_group = distance.sanitize_group_value(group_value)
         matrix_path = run_dir / f"05_distance_matrix_group-{safe_group}.xlsx"
         cached_matrix_path = mock_matrix_cache_path(group_value)
-        if cached_matrix_path.exists():
-            matrix_df = pd.read_excel(cached_matrix_path, index_col=0)
-            matrix_df = matrix_df.reindex(index=full_addresses, columns=full_addresses)
-            if matrix_df.isna().any().any():
-                matrix_df = distance.build_matrix_for_addresses(full_addresses, coords_dict)
-        else:
-            matrix_df = distance.build_matrix_for_addresses(full_addresses, coords_dict)
+        pair_cache_updates.extend(seed_pair_cache_from_matrix(cached_matrix_path, full_addresses, pair_cache))
+        matrix_df, updates = build_matrix_with_pair_cache(
+            full_addresses,
+            coords_dict,
+            distance.API_KEY,
+            not args.mock_google,
+            pair_cache,
+        )
+        pair_cache_updates.extend(updates)
         matrix_df.to_excel(matrix_path)
         matrix_paths.append(matrix_path)
 
-    return matrix_paths, StageResult(5, "Build distance matrices", "completed", [coords_cache_path, *matrix_paths])
+    pair_cache_path = save_distance_pair_cache_updates(run_dir, pair_cache_updates)
+    output_files = [coords_cache_path, *matrix_paths]
+    if pair_cache_path:
+        output_files.append(pair_cache_path)
+    return matrix_paths, StageResult(5, "Build distance matrices", "completed", output_files)
 
 
 def matrix_label(row: pd.Series) -> str:
@@ -1979,17 +2599,119 @@ def delivery_iteration_delivered_selected(iteration_dir: Path, deferred_count: i
     return leftover_count <= deferred_count
 
 
+def delivery_iteration_metrics(
+    iteration_dir: Path,
+    selected_count: int,
+    deferred_count: int,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    workbook_path = iteration_dir / "06_delivery_plan.xlsx"
+    leftover_path = iteration_dir / "06_leftover_orders_next_run.xlsx"
+    max_shift = float(constraint_value(args, "max_shift_minutes", 720))
+    driver_times: list[float] = []
+    if workbook_path.exists():
+        try:
+            summary_df = pd.read_excel(workbook_path, sheet_name="Summary").fillna("")
+            if "Total Time (min)" in summary_df.columns:
+                driver_times = [
+                    float(value)
+                    for value in pd.to_numeric(summary_df["Total Time (min)"], errors="coerce").dropna().tolist()
+                ]
+        except Exception:
+            driver_times = []
+    leftover_count = len(pd.read_excel(leftover_path).fillna("")) if leftover_path.exists() else selected_count + deferred_count
+    selected_leftover = max(0, leftover_count - deferred_count)
+    total_slack = sum(max(0.0, max_shift - minutes) for minutes in driver_times)
+    return {
+        "driver_times": driver_times,
+        "leftover_count": leftover_count,
+        "selected_leftover": selected_leftover,
+        "total_slack": total_slack,
+    }
+
+
+def smart_success_step(
+    ordered_orders: pd.DataFrame,
+    selected_count: int,
+    metrics: dict[str, Any],
+    args: argparse.Namespace,
+    warehouse: dict[str, Any],
+) -> int:
+    min_step = max(1, int(constraint_value(args, "smart_min_step", 5)))
+    max_step = max(min_step, int(constraint_value(args, "smart_max_step", 30)))
+    remaining_rows = max(0, len(ordered_orders) - selected_count)
+    if remaining_rows <= 0:
+        return 0
+    current_estimate = estimate_selected_rows(ordered_orders, selected_count, args, warehouse)
+    average_minutes = max(
+        float(constraint_value(args, "service_minutes_per_package", 4))
+        + float(constraint_value(args, "estimated_city_stop_minutes", 3)),
+        current_estimate.estimated_total_minutes / max(1, selected_count),
+    )
+    slack_based = int(metrics.get("total_slack", 0) / average_minutes)
+    if slack_based <= 0:
+        return min(min_step, remaining_rows)
+    return min(max(min_step, slack_based), max_step, remaining_rows)
+
+
+def smart_failure_step(selected_count: int, metrics: dict[str, Any], args: argparse.Namespace) -> int:
+    min_step = max(1, int(constraint_value(args, "smart_min_step", 5)))
+    max_step = max(min_step, int(constraint_value(args, "smart_max_step", 30)))
+    selected_leftover = int(metrics.get("selected_leftover", 0) or 0)
+    if selected_leftover > 0:
+        return min(max(selected_leftover, min_step), max_step, selected_count - 1)
+    fallback = max(min_step, int(round(selected_count * 0.1)))
+    return min(fallback, max_step, selected_count - 1)
+
+
+def next_unattempted_count(
+    preferred: int,
+    attempted: set[int],
+    lower_bound: int,
+    upper_bound: int,
+) -> int | None:
+    preferred = max(lower_bound, min(preferred, upper_bound))
+    if preferred not in attempted:
+        return preferred
+    for distance in range(1, upper_bound - lower_bound + 1):
+        for candidate in (preferred + distance, preferred - distance):
+            if lower_bound <= candidate <= upper_bound and candidate not in attempted:
+                return candidate
+    return None
+
+
+def copy_final_successful_output(run_dir: Path, best_count: int, output_path: Path, summary_path: Path) -> Path:
+    final_dir = run_dir / f"final_successful_output_{best_count:04d}"
+    final_dir.mkdir(parents=True, exist_ok=True)
+    source_dir = output_path.parent
+    for filename in [
+        "06_delivery_plan.xlsx",
+        "06_delivery_plan.html",
+        "02b_selected_orders_for_run.xlsx",
+        "02c_deferred_orders_next_run.xlsx",
+    ]:
+        source = source_dir / filename
+        if source.exists():
+            (final_dir / filename).write_bytes(source.read_bytes())
+    if summary_path.exists():
+        (final_dir / summary_path.name).write_bytes(summary_path.read_bytes())
+    return final_dir
+
+
 def run_delivery_iteration(
     ordered_orders: pd.DataFrame,
     selected_count: int,
     run_dir: Path,
     args: argparse.Namespace,
+    attempt_number: int | None = None,
 ) -> tuple[Path, StageResult, bool, int, Path]:
     selected_count = max(1, min(selected_count, len(ordered_orders)))
-    iteration_dir = run_dir / f"iterative_selected-{selected_count:04d}"
+    if attempt_number is None:
+        iteration_dir = run_dir / f"iterative_selected-{selected_count:04d}"
+    else:
+        iteration_dir = run_dir / f"attempt-{attempt_number:03d}_selected-{selected_count:04d}"
     iteration_dir.mkdir(parents=True, exist_ok=True)
-    selected = ordered_orders.head(selected_count).copy()
-    deferred = ordered_orders.iloc[selected_count:].copy()
+    selected, deferred = split_orders_by_priority_and_closeness(ordered_orders, selected_count, args)
     selected_path = iteration_dir / "02b_selected_orders_for_run.xlsx"
     deferred_path = iteration_dir / "02c_deferred_orders_next_run.xlsx"
     selected.to_excel(selected_path, index=False)
@@ -2032,16 +2754,26 @@ def run_iterative_delivery_search(
     if ordered_orders.empty:
         raise RuntimeError("Iterative delivery search has no geocoded orders to route.")
 
+    smart_enabled = constraint_bool(args, "smart_iterative_selection", True)
     step = int(constraint_value(args, "iterative_address_step", 10))
     if step <= 0:
         step = 10
     max_iterations = int(constraint_value(args, "iterative_max_iterations", 25))
-    selected_count = min(initial_selection_capacity(args), len(ordered_orders))
+    warehouse = resolve_warehouse(args)
+    initial_estimate: SmartSelectionEstimate | None = None
+    if smart_enabled:
+        selected_count, initial_estimate = find_smart_initial_selection_count(ordered_orders, args, warehouse)
+    else:
+        selected_count = min(initial_selection_capacity(args), len(ordered_orders))
     attempted: set[int] = set()
     results: list[StageResult] = []
     best_success: tuple[int, Path] | None = None
-    first_failure: int | None = None
+    failure_bound: int | None = None
     last_output_path: Path | None = None
+    decision_lines: list[str] = []
+    stop_gap = max(1, int(constraint_value(args, "smart_stop_gap", 1)))
+    if smart_enabled and initial_estimate is not None:
+        decision_lines.extend(smart_estimate_notes(initial_estimate))
 
     for _ in range(max_iterations):
         if selected_count in attempted:
@@ -2052,32 +2784,91 @@ def run_iterative_delivery_search(
             selected_count,
             run_dir,
             args,
+            len(results) + 1,
         )
         last_output_path = output_path
+        metrics = delivery_iteration_metrics(_iteration_dir, selected_count, _deferred_count, args)
+        driver_times_text = ", ".join(f"{minutes:.0f}" for minutes in metrics["driver_times"]) or "unknown"
+        result.notes.append(
+            f"Driver minutes: [{driver_times_text}]; selected leftovers: {metrics['selected_leftover']}; slack minutes: {metrics['total_slack']:.0f}."
+        )
         results.append(result)
+
+        if not smart_enabled:
+            if success:
+                best_success = (selected_count, output_path)
+                next_count = min(selected_count + step, len(ordered_orders))
+                if next_count == selected_count:
+                    break
+                if failure_bound is not None and next_count >= failure_bound:
+                    break
+                selected_count = next_count
+            else:
+                failure_bound = selected_count if failure_bound is None else min(failure_bound, selected_count)
+                next_count = selected_count - step
+                if next_count < 1:
+                    break
+                selected_count = next_count
+            continue
+
         if success:
             best_success = (selected_count, output_path)
-            next_count = min(selected_count + step, len(ordered_orders))
-            if next_count == selected_count:
+            if failure_bound is not None:
+                gap = failure_bound - selected_count
+                decision_lines.append(f"{selected_count} succeeded; narrowing bracket {selected_count}-{failure_bound}.")
+                if gap <= stop_gap:
+                    break
+                next_count = selected_count + max(1, gap // 2)
+            else:
+                smart_step = smart_success_step(ordered_orders, selected_count, metrics, args, warehouse)
+                if smart_step <= 0:
+                    break
+                next_count = selected_count + smart_step
+                decision_lines.append(f"{selected_count} succeeded; adding {smart_step} rows from driver slack.")
+            next_attempt = next_unattempted_count(next_count, attempted, selected_count + 1, len(ordered_orders))
+            if next_attempt is None:
                 break
-            if first_failure is not None and next_count >= first_failure:
-                break
-            selected_count = next_count
+            if failure_bound is not None and next_attempt >= failure_bound:
+                next_attempt = next_unattempted_count(
+                    selected_count + max(1, (failure_bound - selected_count) // 2),
+                    attempted,
+                    selected_count + 1,
+                    failure_bound - 1,
+                )
+                if next_attempt is None:
+                    break
+            selected_count = next_attempt
         else:
-            first_failure = selected_count
-            next_count = selected_count - step
-            if next_count < 1:
+            failure_bound = selected_count if failure_bound is None else min(failure_bound, selected_count)
+            if best_success is not None:
+                gap = failure_bound - best_success[0]
+                decision_lines.append(f"{selected_count} failed; narrowing bracket {best_success[0]}-{failure_bound}.")
+                if gap <= stop_gap:
+                    break
+                next_count = best_success[0] + max(1, gap // 2)
+                next_attempt = next_unattempted_count(next_count, attempted, best_success[0] + 1, failure_bound - 1)
+            else:
+                remove_step = smart_failure_step(selected_count, metrics, args)
+                next_count = selected_count - remove_step
+                decision_lines.append(f"{selected_count} failed; removing {remove_step} rows from selected leftovers.")
+                next_attempt = next_unattempted_count(next_count, attempted, 1, selected_count - 1)
+            if next_attempt is None:
                 break
-            selected_count = next_count
+            selected_count = next_attempt
 
     summary_path = run_dir / "iterative_delivery_summary.txt"
     lines = [
-        "Iterative delivery search",
-        f"Step size: {step}",
+        "Smart iterative delivery search" if smart_enabled else "Iterative delivery search",
+        f"Mode: {'smart estimate + bracket search' if smart_enabled else 'fixed step'}",
+        f"Fallback/fixed step size: {step}",
+        f"Smart stop gap: {stop_gap}" if smart_enabled else "",
         f"Attempts: {len(results)}",
         f"Best successful selected count: {best_success[0] if best_success else 'none'}",
         "",
     ]
+    lines.extend(line for line in decision_lines if line)
+    if decision_lines:
+        lines.append("")
     for result in results:
         lines.append(f"{result.name}: {result.status}")
         lines.extend(f"  - {note}" for note in result.notes)
@@ -2095,6 +2886,16 @@ def run_iterative_delivery_search(
         if last_output_path is None:
             raise RuntimeError("Iterative delivery search did not complete any attempts.")
         return last_output_path, results
+    final_dir = copy_final_successful_output(run_dir, best_success[0], best_success[1], summary_path)
+    results.append(
+        StageResult(
+            6,
+            "Final successful output",
+            "completed",
+            [final_dir],
+            [f"Copied best successful attempt ({best_success[0]} selected rows) into {final_dir.name}."],
+        )
+    )
     return best_success[1], results
 
 
