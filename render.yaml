@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: routecraft-demo
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python routecraft_web.py
+    autoDeploy: true

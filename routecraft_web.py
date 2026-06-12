@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import os
 import re
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 
@@ -23,12 +24,25 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "web"
 STATIC_DIR = WEB_DIR / "static"
+if not STATIC_DIR.exists():
+    STATIC_DIR = WEB_DIR / "data tor desktop screens"
+MOBILE_DIR = ROOT / "mobile"
+MOBILE_STATIC_DIR = MOBILE_DIR / "static"
 JOBS_DIR = ROOT / ".tmp" / "web_jobs"
 WEB_RUNS_DIR = ROOT / "runs" / "web_app"
 DEFAULT_CONSTRAINTS_PATH = ROOT / "constraints_parameters_experimental.json"
 PIPELINE_SCRIPT = ROOT / "const_experimental.py"
 DEMO_RESULTS_ZIP = ROOT / "runs" / "results_for_web" / "final_successful_output_0510.zip"
 DEMO_RESULTS_DIR = ROOT / ".tmp" / "results_for_web" / "final_successful_output_0510"
+COMPARISON_RESULTS_ROOT = ROOT / "runs" / "results_for_comparison"
+DISPLAY_DRIVER_NAMES = [
+    "דביר לוי",
+    "שמעיה סבן",
+    "נהוראי מלצר",
+    "יוסי אביטן",
+    "איתיאל סופר",
+    "יעל רבינוביץ",
+]
 
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 WEB_RUNS_DIR.mkdir(parents=True, exist_ok=True)
@@ -432,6 +446,21 @@ def ensure_demo_results_dir() -> Path:
     return DEMO_RESULTS_DIR
 
 
+def latest_comparison_results_dir() -> Path:
+    if not COMPARISON_RESULTS_ROOT.exists():
+        raise FileNotFoundError(f"Comparison results folder not found: {COMPARISON_RESULTS_ROOT}")
+    candidates = [
+        path
+        for path in COMPARISON_RESULTS_ROOT.rglob("*")
+        if path.is_dir() and (path / "06_delivery_plan.xlsx").exists()
+    ]
+    if not candidates and (COMPARISON_RESULTS_ROOT / "06_delivery_plan.xlsx").exists():
+        candidates = [COMPARISON_RESULTS_ROOT]
+    if not candidates:
+        raise FileNotFoundError(f"No generated delivery plan found under: {COMPARISON_RESULTS_ROOT}")
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
 def parse_pipeline_result(job: JobState) -> dict:
     final_report = job.final_report
     if final_report is None or not final_report.exists():
@@ -542,6 +571,7 @@ def parse_pipeline_result(job: JobState) -> dict:
         "files": {
             "delivery_plan_xlsx": file_url(job, final_report),
             "delivery_plan_html": file_url(job, html_path) if html_path.exists() else "",
+            "failed_addresses": file_url(job, failed_path) if failed_path.exists() else "",
             "leftover_orders": file_url(job, leftover_path) if leftover_path.exists() else "",
             "selected_orders": file_url(job, selected_path) if selected_path.exists() else "",
             "run_folder": str(run_dir),
@@ -550,11 +580,10 @@ def parse_pipeline_result(job: JobState) -> dict:
     return result
 
 
-def parse_demo_result() -> dict:
-    result_dir = ensure_demo_results_dir()
+def parse_saved_result(result_dir: Path, file_prefix: str, source: str) -> dict:
     final_report = result_dir / "06_delivery_plan.xlsx"
     if not final_report.exists():
-        raise RuntimeError("Saved real results ZIP does not contain 06_delivery_plan.xlsx.")
+        raise RuntimeError(f"Saved results folder does not contain 06_delivery_plan.xlsx: {result_dir}")
 
     summary_rows = sheet_rows(final_report, "Summary")
     detail_rows = sheet_rows(final_report, "Detailed Routes")
@@ -643,16 +672,110 @@ def parse_demo_result() -> dict:
             "max_shift_minutes": clean_cell(constraints.get("Max Shift Minutes", "")),
             "ideal_shift_minutes": clean_cell(constraints.get("Ideal Shift Minutes", "")),
             "warehouse": clean_cell(constraints.get("Warehouse Name", "")),
-            "source": "Saved real Google API run",
+            "source": source,
         },
         "drivers": drivers,
         "files": {
-            "delivery_plan_xlsx": "/api/demo-result/files/06_delivery_plan.xlsx",
-            "delivery_plan_html": "/api/demo-result/files/06_delivery_plan.html" if html_path.exists() else "",
-            "leftover_orders": "/api/demo-result/files/07_boss_not_in_run_addresses.xlsx" if not_in_run_path.exists() else "",
-            "selected_orders": "/api/demo-result/files/07_boss_delivered_addresses.xlsx" if delivered_path.exists() else "",
+            "delivery_plan_xlsx": f"{file_prefix}/files/06_delivery_plan.xlsx",
+            "delivery_plan_html": f"{file_prefix}/files/06_delivery_plan.html" if html_path.exists() else "",
+            "failed_addresses": f"{file_prefix}/files/07_boss_failed_addresses.xlsx" if failed_path.exists() else "",
+            "leftover_orders": f"{file_prefix}/files/07_boss_not_in_run_addresses.xlsx" if not_in_run_path.exists() else "",
+            "selected_orders": f"{file_prefix}/files/07_boss_delivered_addresses.xlsx" if delivered_path.exists() else "",
             "run_folder": str(result_dir),
         },
+    }
+
+
+def parse_demo_result() -> dict:
+    return parse_saved_result(ensure_demo_results_dir(), "/api/demo-result", "Saved real Google API run")
+
+
+def parse_comparison_result() -> dict:
+    return parse_saved_result(latest_comparison_results_dir(), "/api/comparison-result", "Comparison results run")
+
+
+def parse_source_result(source: str) -> dict:
+    if source == "demo":
+        return parse_demo_result()
+    return parse_comparison_result()
+
+
+def haversine_km(first: dict, second: dict) -> float:
+    lat1, lng1 = float(first["lat"]), float(first["lng"])
+    lat2, lng2 = float(second["lat"]), float(second["lng"])
+    radius_km = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
+    )
+    return radius_km * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def route_distance_km(points: list[dict]) -> float:
+    clean_points = [
+        point
+        for point in points
+        if point.get("lat") is not None and point.get("lng") is not None
+    ]
+    return sum(haversine_km(a, b) for a, b in zip(clean_points, clean_points[1:]))
+
+
+def minutes_to_duration(minutes: float) -> str:
+    total = max(0, int(round(minutes)))
+    hours = total // 60
+    mins = total % 60
+    if hours and mins:
+        return f"{hours}h {mins}m"
+    if hours:
+        return f"{hours}h"
+    return f"{mins}m"
+
+
+def display_driver(driver: dict, index: int) -> dict:
+    route_points = driver.get("route_points") or driver.get("delivery_points") or []
+    stops = route_points or [{"label": stop} for stop in driver.get("stops", []) if stop]
+    source_name = clean_cell(driver.get("name", "")) or f"Driver {index + 1}"
+    display_name = DISPLAY_DRIVER_NAMES[index] if index < len(DISPLAY_DRIVER_NAMES) else source_name
+    addresses = int(driver.get("addresses") or max(0, len(stops) - 1))
+    distance = route_distance_km(route_points)
+    return {
+        **driver,
+        "name": display_name,
+        "source_name": source_name,
+        "driver_index": index,
+        "addresses": addresses,
+        "duration_label": minutes_to_duration(float(driver.get("total_minutes") or 0)),
+        "distance_km": round(distance, 1),
+        "stops": stops,
+        "route_points": route_points,
+    }
+
+
+def mobile_payload(source: str, requested_driver: str) -> dict:
+    result = parse_source_result(source)
+    drivers = result.get("drivers") or []
+    if not drivers:
+        raise RuntimeError("No driver routes were found in the selected Routecraft result.")
+
+    selected_index = 0
+    normalized_request = clean_cell(requested_driver)
+    if normalized_request:
+        for index, driver in enumerate(drivers):
+            display_name = DISPLAY_DRIVER_NAMES[index] if index < len(DISPLAY_DRIVER_NAMES) else clean_cell(driver.get("name", ""))
+            if normalized_request in {display_name, clean_cell(driver.get("name", ""))}:
+                selected_index = index
+                break
+
+    driver = display_driver(drivers[selected_index], selected_index)
+    summary = result.get("summary") or {}
+    capacity = int(summary.get("capacity") or max(driver.get("addresses") or 0, 1))
+    return {
+        "summary": summary,
+        "driver": driver,
+        "capacity": capacity,
+        "source": source,
     }
 
 
@@ -738,8 +861,26 @@ class RoutecraftHandler(BaseHTTPRequestHandler):
         if path == "/":
             self.serve_file(WEB_DIR / "index.html")
             return
+        if path in {"/mobile", "/mobile/"}:
+            self.serve_file(MOBILE_DIR / "index.html")
+            return
+        if path.startswith("/mobile/static/"):
+            self.serve_file(MOBILE_STATIC_DIR / unquote(path.removeprefix("/mobile/static/")))
+            return
         if path.startswith("/static/"):
-            self.serve_file(STATIC_DIR / unquote(path.removeprefix("/static/")))
+            rel_path = unquote(path.removeprefix("/static/"))
+            desktop_asset = STATIC_DIR / rel_path
+            mobile_asset = MOBILE_STATIC_DIR / rel_path
+            self.serve_file(desktop_asset if desktop_asset.exists() else mobile_asset)
+            return
+        if path == "/api/driver-route":
+            params = parse_qs(parsed.query)
+            source = clean_cell((params.get("source") or ["comparison"])[0]) or "comparison"
+            driver = clean_cell((params.get("driver") or ["דביר לוי"])[0])
+            try:
+                json_response(self, mobile_payload(source, driver))
+            except Exception as exc:
+                json_response(self, {"error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
         if path == "/api/demo-result":
             try:
@@ -758,6 +899,24 @@ class RoutecraftHandler(BaseHTTPRequestHandler):
         demo_file_match = re.match(r"^/api/demo-result/files/(.+)$", path)
         if demo_file_match:
             self.serve_demo_file(unquote(demo_file_match.group(1)))
+            return
+        if path == "/api/comparison-result":
+            try:
+                json_response(
+                    self,
+                    {
+                        "id": "comparison-results",
+                        "status": "completed",
+                        "input_name": "Latest comparison run",
+                        "result": parse_comparison_result(),
+                    },
+                )
+            except Exception as exc:
+                json_response(self, {"error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+        comparison_file_match = re.match(r"^/api/comparison-result/files/(.+)$", path)
+        if comparison_file_match:
+            self.serve_comparison_file(unquote(comparison_file_match.group(1)))
             return
         if re.fullmatch(r"/api/jobs/[^/]+", path):
             job_id = path.rsplit("/", 1)[1]
@@ -860,19 +1019,39 @@ class RoutecraftHandler(BaseHTTPRequestHandler):
             return
         self.serve_file(target)
 
+    def serve_comparison_file(self, rel_path: str) -> None:
+        try:
+            base = latest_comparison_results_dir().resolve()
+        except Exception:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        target = (base / rel_path).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError:
+            self.send_error(HTTPStatus.FORBIDDEN)
+            return
+        self.serve_file(target)
+
     def log_message(self, format: str, *args) -> None:
         return
 
 
 def main() -> int:
-    host = os.getenv("ROUTECRAFT_HOST", "127.0.0.1")
-    port = int(os.getenv("ROUTECRAFT_PORT", "8080"))
+    host = os.getenv("ROUTECRAFT_HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", os.getenv("ROUTECRAFT_PORT", "8080")))
     server = ThreadingHTTPServer((host, port), RoutecraftHandler)
-    print(f"Routecraft web app running at http://{host}:{port}")
+    try:
+        print(f"Routecraft web app running at http://{host}:{port}", flush=True)
+    except (AttributeError, OSError):
+        pass
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping Routecraft web app.")
+        try:
+            print("\nStopping Routecraft web app.")
+        except (AttributeError, OSError):
+            pass
     return 0
 
 

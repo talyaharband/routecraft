@@ -1,0 +1,409 @@
+<!doctype html>
+<html class="light" lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FINELINE Route Planning</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#000000",
+              "primary-container": "#131b2e",
+              secondary: "#0051d5",
+              "secondary-container": "#316bf3",
+              background: "#f8f9ff",
+              surface: "#f8f9ff",
+              "surface-bright": "#f8f9ff",
+              "surface-container-lowest": "#ffffff",
+              "surface-container-low": "#eff4ff",
+              "surface-container": "#e5eeff",
+              "surface-container-high": "#dce9ff",
+              "surface-container-highest": "#d3e4fe",
+              "surface-variant": "#d3e4fe",
+              "on-background": "#0b1c30",
+              "on-surface": "#0b1c30",
+              "on-surface-variant": "#45464d",
+              "on-primary": "#ffffff",
+              "on-primary-container": "#7c839b",
+              "outline": "#76777d",
+              "outline-variant": "#c6c6cd",
+              "error": "#ba1a1a",
+              "error-container": "#ffdad6",
+              "inverse-surface": "#213145",
+              "tertiary-fixed": "#fcdeb5"
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px"
+            },
+            spacing: {
+              base: "4px",
+              xs: "8px",
+              sm: "12px",
+              md: "16px",
+              lg: "24px",
+              xl: "32px",
+              gutter: "20px",
+              sidebar_width: "260px"
+            },
+            fontFamily: {
+              "headline-md": ["Inter", "sans-serif"],
+              "body-sm": ["Inter", "sans-serif"],
+              "title-sm": ["Inter", "sans-serif"],
+              "label-caps": ["Inter", "sans-serif"],
+              "data-mono": ["JetBrains Mono", "monospace"],
+              "body-md": ["Inter", "sans-serif"],
+              "display-lg": ["Inter", "sans-serif"]
+            },
+            fontSize: {
+              "headline-md": ["24px", { lineHeight: "32px", fontWeight: "600" }],
+              "body-sm": ["13px", { lineHeight: "18px", fontWeight: "400" }],
+              "title-sm": ["18px", { lineHeight: "24px", fontWeight: "600" }],
+              "label-caps": ["11px", { lineHeight: "16px", letterSpacing: "0.05em", fontWeight: "700" }],
+              "data-mono": ["13px", { lineHeight: "16px", fontWeight: "500" }],
+              "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }],
+              "display-lg": ["32px", { lineHeight: "40px", fontWeight: "700" }]
+            }
+          }
+        }
+      };
+    </script>
+    <link rel="stylesheet" href="/static/styles.css?v=driver-name-header-1" />
+  </head>
+  <body class="bg-background text-on-background min-h-screen font-body-md">
+    <nav class="hidden md:flex w-sidebar_width h-screen fixed left-0 top-0 bg-surface-container-lowest shadow-sm flex-col border-r border-outline-variant z-50">
+      <div class="p-lg border-b border-outline-variant/30">
+        <h1 class="font-headline-md text-headline-md font-bold text-primary tracking-tight">FINELINE</h1>
+        <p class="font-body-sm text-body-sm text-on-surface-variant mt-base">Logistics Operations</p>
+      </div>
+      <div class="flex flex-col py-md flex-1 gap-base">
+        <button class="nav-item active" type="button">
+          <span class="material-symbols-outlined mr-sm" style="font-variation-settings: 'FILL' 1;">calendar_today</span>
+          <span class="font-body-md text-body-md">Daily Planning</span>
+        </button>
+        <button class="nav-item" type="button" disabled>
+          <span class="material-symbols-outlined mr-sm">history</span>
+          <span class="font-body-md text-body-md">Previous Runs</span>
+        </button>
+        <button class="nav-item" type="button" disabled>
+          <span class="material-symbols-outlined mr-sm">analytics</span>
+          <span class="font-body-md text-body-md">Analytics</span>
+        </button>
+        <button class="nav-item" type="button" disabled>
+          <span class="material-symbols-outlined mr-sm">settings</span>
+          <span class="font-body-md text-body-md">Settings</span>
+        </button>
+      </div>
+      <div class="p-lg border-t border-outline-variant/30 flex items-center gap-sm">
+        <div class="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center text-primary font-bold">AC</div>
+        <div>
+          <p class="font-body-sm text-body-sm font-semibold text-on-surface">Alex Carter</p>
+          <p class="font-label-caps text-label-caps text-on-surface-variant">DISPATCH MGR</p>
+        </div>
+      </div>
+    </nav>
+
+    <div class="min-h-screen md:ml-sidebar_width flex flex-col">
+      <header class="bg-surface shadow-sm px-md md:px-xl flex justify-between items-center sticky top-0 z-40 w-full border-b border-outline-variant/20 h-14">
+        <div class="flex items-center gap-sm min-w-0">
+          <h2 class="font-title-sm text-title-sm text-primary font-semibold truncate">Daily Route Planning</h2>
+          <span class="hidden" id="currentDate"></span>
+        </div>
+        <div class="flex items-center gap-lg text-on-surface-variant">
+          <button class="hover:text-secondary transition-colors relative" type="button" aria-label="Notifications">
+            <span class="material-symbols-outlined">notifications</span>
+            <span class="absolute top-0 right-0 w-2 h-2 bg-error rounded-full"></span>
+          </button>
+          <button class="hover:text-secondary transition-colors" type="button" aria-label="Calendar">
+            <span class="material-symbols-outlined">calendar_month</span>
+          </button>
+          <div class="manager-chip" aria-label="Signed in as Alex Carter">
+            <span class="manager-avatar">AC</span>
+            <span class="manager-name">Alex Carter</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="flex-1">
+        <section id="dailySetupScreen" class="screen hidden">
+          <form id="plannerForm" class="p-md md:p-xl max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-lg" novalidate>
+            <div class="lg:col-span-2 flex flex-col gap-lg">
+              <div class="stitch-card">
+                <div class="flex items-center gap-sm mb-lg">
+                  <span class="material-symbols-outlined text-secondary">local_shipping</span>
+                  <h3 class="font-title-sm text-title-sm text-on-surface">Fleet Parameters</h3>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-lg">
+                  <label class="flex flex-col gap-xs">
+                    <span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Number of Available Drivers</span>
+                    <input id="drivers" name="drivers" class="stitch-input" type="number" min="1" max="99" value="12" required />
+                  </label>
+                  <label class="flex flex-col gap-xs">
+                    <span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Average Vehicle Capacity (Pkgs)</span>
+                    <input id="capacity" name="capacity" class="stitch-input" type="number" min="1" max="999" value="45" required />
+                  </label>
+                </div>
+                <div class="mt-lg pt-lg border-t border-outline-variant/20">
+                  <div class="flex justify-between items-center gap-sm mb-sm">
+                    <span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Fleet Capacity Forecast</span>
+                    <span class="font-data-mono text-data-mono text-on-surface text-[12px]" id="capacityForecast">Estimated Load: waiting for file</span>
+                  </div>
+                  <div class="w-full bg-surface-container-high h-2 rounded-full overflow-hidden">
+                    <div id="capacityBar" class="bg-secondary h-full rounded-full transition-all" style="width: 10%;"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="stitch-card flex flex-col">
+                <div class="flex items-center justify-between mb-md gap-sm">
+                  <div class="flex items-center gap-sm">
+                    <span class="material-symbols-outlined text-secondary">upload_file</span>
+                    <h3 class="font-title-sm text-title-sm text-on-surface">Orders Source</h3>
+                  </div>
+                  <span class="font-label-caps text-label-caps text-on-surface-variant bg-surface-container py-xs px-sm rounded-full">XLSX ONLY</span>
+                </div>
+                <div class="flex p-base bg-surface-container-low rounded-lg mb-lg w-full max-w-sm border border-outline-variant/20">
+                  <button id="uploadModeButton" class="flex-1 py-sm text-center rounded-md font-body-sm text-body-sm font-semibold bg-surface-container-lowest text-secondary shadow-sm" type="button">Upload File</button>
+                  <button class="flex-1 py-sm text-center rounded-md font-body-sm text-body-sm font-medium text-on-surface-variant opacity-60 cursor-not-allowed" type="button" disabled>Preloaded Demo File</button>
+                </div>
+                <label id="uploadZone" class="upload-zone">
+                  <input id="ordersFile" name="orders" type="file" accept=".xlsx,.xls" required />
+                  <span class="material-symbols-outlined text-[34px] text-secondary">table_chart</span>
+                  <span class="font-body-md text-body-md font-semibold text-on-surface" id="fileName">Choose the daily orders Excel file</span>
+                  <span class="font-body-sm text-body-sm text-on-surface-variant">Drop an .xlsx file here or click to browse</span>
+                  <span id="fileReadyBadge" class="hidden font-label-caps text-label-caps text-[#107C41] bg-[#107C41]/10 py-xs px-sm rounded-full items-center gap-xs">
+                    <span class="material-symbols-outlined text-[14px]">check</span> Ready to Use
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div class="lg:col-span-1 flex flex-col gap-lg">
+              <div class="stitch-card h-full flex flex-col">
+                <div class="flex items-center gap-sm mb-lg border-b border-outline-variant/20 pb-sm">
+                  <span class="material-symbols-outlined text-on-surface-variant">assignment</span>
+                  <h3 class="font-title-sm text-title-sm text-on-surface">Input Summary</h3>
+                </div>
+                <div class="flex-1 flex flex-col gap-md">
+                  <div class="flex flex-col gap-xs p-sm bg-surface-container-low rounded border-l-2 border-secondary">
+                    <span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Orders Source</span>
+                    <span class="font-body-sm text-body-sm font-medium text-on-surface" id="summarySource">No file selected</span>
+                  </div>
+                  <div class="summary-row">
+                    <span><span class="material-symbols-outlined text-[18px]">person</span> Drivers</span>
+                    <strong id="summaryDrivers">12</strong>
+                  </div>
+                  <div class="summary-row">
+                    <span><span class="material-symbols-outlined text-[18px]">inventory_2</span> Capacity</span>
+                    <strong><span id="summaryCapacity">45</span> <span class="text-outline text-[11px] font-normal">pkgs/ea</span></strong>
+                  </div>
+                  <div class="summary-row emphasized">
+                    <span><span class="material-symbols-outlined text-[18px]">location_on</span> Upload</span>
+                    <strong id="summaryAddresses">Pending</strong>
+                  </div>
+                  <p id="formError" class="text-error font-body-sm text-body-sm font-semibold min-h-[20px]"></p>
+                </div>
+                <button id="submitButton" class="w-full mt-xl bg-[#2563EB] hover:bg-[#1E40AF] text-white font-body-md text-body-md font-medium py-md rounded-lg shadow-sm transition-all flex items-center justify-center gap-sm active:scale-[0.98]" type="submit">
+                  <span class="material-symbols-outlined text-[20px]">route</span>
+                  Generate Daily Routes
+                </button>
+                <button id="demoResultsButton" class="w-full mt-sm bg-surface-container-lowest hover:bg-surface-container-low text-secondary border border-secondary/30 font-body-md text-body-md font-semibold py-sm rounded-lg shadow-sm transition-all flex items-center justify-center gap-sm" type="button">
+                  <span class="material-symbols-outlined text-[20px]">map</span>
+                  Open Saved Real Google Results
+                </button>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <section id="processingScreen" class="screen hidden">
+          <div class="min-h-[calc(100vh-56px)] relative overflow-hidden">
+            <div class="absolute inset-0 z-0 bg-surface p-xl filter blur-sm opacity-40 pointer-events-none">
+              <div class="max-w-7xl mx-auto grid grid-cols-4 gap-gutter">
+                <div class="stitch-card h-28"></div>
+                <div class="stitch-card h-28"></div>
+                <div class="stitch-card h-28"></div>
+                <div class="stitch-card h-28"></div>
+                <div class="stitch-card col-span-2 h-96"></div>
+                <div class="stitch-card col-span-2 h-96"></div>
+              </div>
+            </div>
+            <div class="absolute inset-0 z-10 flex items-center justify-center bg-inverse-surface/40 backdrop-blur-md p-md">
+              <div class="bg-surface-container-lowest w-full max-w-2xl rounded-xl shadow-2xl border border-outline-variant/30 overflow-hidden">
+                <div class="p-xl text-center border-b border-outline-variant/20">
+                  <div id="processingSpinner" class="spinner mx-auto mb-lg w-16 h-16 rounded-full border-4 border-surface-container-high border-t-secondary"></div>
+                  <h2 class="font-headline-md text-headline-md text-primary">Processing Daily Routes</h2>
+                  <p class="font-body-md text-body-md text-on-surface-variant mt-xs">The routing pipeline is cleaning, geocoding, grouping, and planning the run.</p>
+                  <span id="jobStatus" class="inline-flex mt-md px-sm py-xs rounded-full bg-surface-container-high text-secondary font-label-caps text-label-caps uppercase">Queued</span>
+                </div>
+                <div class="p-xl">
+                  <div class="grid grid-cols-1 sm:grid-cols-5 gap-sm" id="progressSteps">
+                    <div class="progress-step is-active">Upload received</div>
+                    <div class="progress-step">Clean addresses</div>
+                    <div class="progress-step">Geocode</div>
+                    <div class="progress-step">Build matrices</div>
+                    <div class="progress-step">Prepare results</div>
+                  </div>
+                  <div id="jobErrorPanel" class="hidden mt-lg rounded-lg border border-error/30 bg-error-container p-md text-error">
+                    <div class="flex items-start gap-sm">
+                      <span class="material-symbols-outlined">error</span>
+                      <div>
+                        <p class="font-body-md text-body-md font-bold">Route generation failed</p>
+                        <p id="jobErrorText" class="font-body-sm text-body-sm mt-base"></p>
+                      </div>
+                    </div>
+                  </div>
+                  <details class="mt-lg">
+                    <summary class="cursor-pointer font-body-sm text-body-sm font-semibold text-secondary">Processing log</summary>
+                    <pre id="jobLog" class="mt-sm max-h-60 overflow-auto bg-[#0f172a] text-[#e2e8f0] rounded-lg p-md text-[12px] leading-5"></pre>
+                  </details>
+                </div>
+                <div class="px-xl py-md border-t border-outline-variant bg-surface-container-lowest flex justify-end gap-sm">
+                  <button id="backToSetupButton" class="hidden px-lg py-xs rounded-lg font-body-md text-body-md font-semibold border border-outline-variant text-on-surface hover:bg-surface-container-low" type="button">Back to Daily Setup</button>
+                  <button class="px-lg py-xs rounded-lg font-title-sm text-body-md font-semibold border border-outline-variant text-outline bg-surface-container-lowest opacity-50 cursor-not-allowed" type="button" disabled>Waiting for Results</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="routeResultsScreen" class="screen">
+          <div class="results-page p-md md:p-xl">
+            <div class="results-shell">
+              <div class="results-actions mb-xl">
+                <div class="flex flex-wrap items-center gap-sm" id="resultActions"></div>
+                <div class="results-alert-grid grid grid-cols-1 md:grid-cols-2 gap-gutter">
+                  <div class="results-alert bg-surface-container-low border border-error/20 rounded-xl p-md flex items-start gap-md shadow-sm">
+                    <div class="results-alert-icon bg-error-container text-error rounded-full p-2 flex items-center justify-center">
+                      <span class="material-symbols-outlined">error</span>
+                    </div>
+                    <div class="flex-1">
+                      <h4 class="font-body-md text-body-md font-bold text-on-surface"><span id="failedAddressCount">0</span> addresses could not be validated</h4>
+                      <p class="font-body-sm text-body-sm text-on-surface-variant mb-sm">Not included in today's routes</p>
+                      <a id="failedAddressesAction" class="action-card-link hidden" href="#" target="_blank" rel="noreferrer">
+                        <span class="material-symbols-outlined text-[16px]">edit_document</span>
+                        Send to manual correction
+                      </a>
+                    </div>
+                  </div>
+                  <div class="results-alert bg-surface-container-low border border-[#b45309]/20 rounded-xl p-md flex items-start gap-md shadow-sm">
+                    <div class="results-alert-icon bg-tertiary-fixed text-[#b45309] rounded-full p-2 flex items-center justify-center">
+                      <span class="material-symbols-outlined">notification_important</span>
+                    </div>
+                    <div class="flex-1">
+                      <h4 class="font-body-md text-body-md font-bold text-on-surface"><span id="unassignedDeliveryCount">0</span> valid deliveries remain unassigned</h4>
+                      <p class="font-body-sm text-body-sm text-on-surface-variant mb-sm">Move to next run or recalculate with updated resources</p>
+                      <a id="unassignedOrdersAction" class="action-card-link hidden" href="#" target="_blank" rel="noreferrer">
+                        <span class="material-symbols-outlined text-[16px]">event_upcoming</span>
+                        Send to tomorrow's shift
+                      </a>
+                    </div>
+                  </div>
+                </div>
+                <button class="dispatch-action" type="button">
+                  <span class="material-symbols-outlined text-[18px]">send</span>
+                  Approve & Dispatch
+                </button>
+              </div>
+
+              <div class="results-workspace">
+                <aside class="results-summary-rail">
+                  <div class="kpi-summary-frame">
+                    <h3 class="kpi-summary-title">KPI Summary</h3>
+                    <div class="results-kpis grid grid-cols-1 lg:grid-cols-4 gap-gutter mb-xl">
+                      <article class="kpi-card kpi-deliveries">
+                        <h3>ASSIGNED DELIVERIES</h3>
+                        <div class="kpi-value-row">
+                          <strong id="kpiAssignedDeliveries">0 / 0</strong>
+                          <span class="material-symbols-outlined kpi-icon">location_on</span>
+                        </div>
+                        <div class="kpi-visual kpi-meter" aria-hidden="true">
+                          <span id="kpiDeliveryFill"></span>
+                        </div>
+                      </article>
+                      <article class="kpi-driver-group lg:col-span-3">
+                        <h3>DRIVER OPERATIONS</h3>
+                        <div class="kpi-driver-grid">
+                          <section class="kpi-card kpi-driver-stat kpi-drivers">
+                            <div>
+                              <span class="kpi-mini-label">Assigned Drivers</span>
+                              <strong id="kpiAssignedDrivers">0</strong>
+                            </div>
+                            <span class="material-symbols-outlined kpi-icon">local_shipping</span>
+                          </section>
+                          <section class="kpi-card kpi-driver-stat kpi-regular">
+                            <h4>REGULAR SHIFTS</h4>
+                            <div class="kpi-value-row">
+                              <strong id="kpiRegularShifts">0</strong>
+                              <span class="material-symbols-outlined kpi-icon">schedule</span>
+                            </div>
+                            <div class="kpi-visual kpi-meter" aria-hidden="true">
+                              <span id="kpiRegularFill"></span>
+                            </div>
+                          </section>
+                          <section class="kpi-card kpi-driver-stat kpi-extended">
+                            <h4>EXTENDED SHIFTS</h4>
+                            <div class="kpi-value-row">
+                              <strong id="kpiExtendedShifts">0</strong>
+                              <span class="material-symbols-outlined kpi-icon">warning</span>
+                            </div>
+                            <div class="kpi-visual kpi-meter" aria-hidden="true">
+                              <span id="kpiExtendedFill"></span>
+                            </div>
+                          </section>
+                        </div>
+                      </article>
+                    </div>
+                  </div>
+                </aside>
+
+                <div class="results-main-grid">
+                  <div class="map-panel bg-surface-container-lowest rounded-xl border border-outline-variant/30 shadow-[0px_1px_3px_rgba(15,23,42,0.08)] flex flex-col overflow-hidden relative">
+                  <div class="absolute top-md right-md z-10 flex gap-xs">
+                    <button class="bg-surface-container-lowest text-on-surface p-xs rounded-md shadow-sm border border-outline-variant/50 hover:bg-surface-container-low" title="Export Routes" type="button">
+                      <span class="material-symbols-outlined text-[20px]">download</span>
+                    </button>
+                  </div>
+                  <div class="map-canvas flex-1 w-full min-h-[440px] bg-surface-variant relative overflow-hidden">
+                    <div id="routeMap" class="absolute inset-0"></div>
+                    <div id="routeMapEmpty" class="absolute inset-0 hidden items-center justify-center bg-surface-container-low text-on-surface-variant p-lg text-center">
+                      <div>
+                        <span class="material-symbols-outlined text-[36px]">map</span>
+                        <p class="font-body-md text-body-md font-semibold mt-sm">No coordinates available for this route.</p>
+                      </div>
+                    </div>
+                    <div class="absolute left-md bottom-md z-[500] bg-surface-container-lowest border border-outline-variant/40 rounded-lg shadow-sm px-sm py-xs">
+                      <p class="font-label-caps text-label-caps text-on-surface-variant uppercase">Selected Route</p>
+                      <p id="mapDriverLabel" class="font-body-sm text-body-sm font-semibold text-on-surface">Driver 1</p>
+                    </div>
+                  </div>
+                </div>
+
+                  <div class="drivers-panel bg-surface-container-lowest rounded-xl border border-outline-variant/30 shadow-[0px_1px_3px_rgba(15,23,42,0.08)] flex flex-col overflow-hidden">
+                    <span class="sr-only" id="driverCountLabel">0 Drivers Active</span>
+                    <div id="driverAssignments" class="flex-1 overflow-y-auto p-md flex flex-col gap-md"></div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/static/app.js?v=dashboard-first-1"></script>
+  </body>
+</html>

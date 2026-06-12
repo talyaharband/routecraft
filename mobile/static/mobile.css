@@ -1,0 +1,213 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  font: inherit;
+}
+
+.demo-restart-button {
+  align-items: flex-start;
+  background: #0b1c30;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.22);
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  position: fixed;
+  right: 24px;
+  top: 20px;
+  z-index: 1200;
+}
+
+.demo-restart-button:hover {
+  background: #142844;
+  transform: translateY(-1px);
+}
+
+.demo-restart-button:focus-visible {
+  outline: 3px solid rgba(0, 81, 213, 0.28);
+  outline-offset: 3px;
+}
+
+.demo-restart-kicker {
+  color: #b4c5ff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 12px;
+  text-transform: uppercase;
+}
+
+.demo-restart-main {
+  align-items: center;
+  display: inline-flex;
+  font-size: 15px;
+  font-weight: 900;
+  gap: 8px;
+  line-height: 20px;
+}
+
+.demo-restart-main .material-symbols-outlined {
+  font-size: 20px;
+}
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.mobile-screen {
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.14);
+}
+
+#todayMap,
+#activeMap {
+  background: #d3e4fe;
+  z-index: 0;
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #d3e4fe;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+.leaflet-control-attribution {
+  display: none;
+}
+
+.route-stop-marker {
+  align-items: center;
+  background: #ffffff;
+  border: 2px solid #0051d5;
+  border-radius: 999px;
+  color: #0051d5;
+  display: flex;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 800;
+  height: 24px;
+  justify-content: center;
+  line-height: 1;
+  width: 24px;
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.18);
+}
+
+.route-stop-marker.is-current {
+  background: #0051d5;
+  color: #ffffff;
+  border-color: #0b1c30;
+}
+
+.route-stop-marker.is-done {
+  background: #dce9ff;
+  color: #45464d;
+  border-color: #c6c6cd;
+}
+
+.route-stop-marker.is-warehouse {
+  background: #fef3c7;
+  border-color: #b45309;
+  color: #92400e;
+}
+
+.remaining-list li {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #dce9ff;
+}
+
+.remaining-list li:last-child {
+  border-bottom: 0;
+}
+
+.remaining-list .stop-number {
+  align-items: center;
+  background: #eff4ff;
+  border-radius: 999px;
+  color: #0051d5;
+  display: inline-flex;
+  flex: 0 0 28px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 800;
+  height: 28px;
+  justify-content: center;
+}
+
+.remaining-list .stop-label {
+  color: #0b1c30;
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  min-width: 0;
+}
+
+@media (max-width: 420px) {
+  .demo-restart-button {
+    border-radius: 8px;
+    left: 12px;
+    padding: 9px 12px;
+    right: auto;
+    top: 10px;
+  }
+
+  .demo-restart-kicker {
+    font-size: 9px;
+    line-height: 11px;
+  }
+
+  .demo-restart-main {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .mobile-screen,
+  #activeScreen,
+  #todayScreen {
+    width: 100vw !important;
+    min-height: 100vh;
+  }
+
+  #todayScreen nav,
+  #activeScreen header,
+  #activeScreen > div:last-child {
+    width: 100vw !important;
+  }
+}

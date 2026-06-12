@@ -1,0 +1,300 @@
+<!-- ROUTECRAFT MOBILE APP - FINELINE -->
+<!doctype html>
+<html class="light h-full" lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>FINELINE Driver App</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-tertiary-container": "#98805d",
+              "on-primary-fixed": "#131b2e",
+              "inverse-primary": "#bec6e0",
+              "primary-fixed": "#dae2fd",
+              "on-surface-variant": "#45464d",
+              "on-primary-fixed-variant": "#3f465c",
+              surface: "#f8f9ff",
+              "on-secondary-container": "#fefcff",
+              "surface-container": "#e5eeff",
+              "on-primary-container": "#7c839b",
+              outline: "#76777d",
+              "on-surface": "#0b1c30",
+              "on-error": "#ffffff",
+              "inverse-on-surface": "#eaf1ff",
+              "on-error-container": "#93000a",
+              "secondary-container": "#316bf3",
+              "on-tertiary": "#ffffff",
+              "tertiary-container": "#271901",
+              "on-secondary-fixed-variant": "#003ea8",
+              "surface-container-low": "#eff4ff",
+              "surface-variant": "#d3e4fe",
+              "surface-container-high": "#dce9ff",
+              "primary-container": "#131b2e",
+              primary: "#000000",
+              "error-container": "#ffdad6",
+              "tertiary-fixed": "#fcdeb5",
+              "secondary-fixed-dim": "#b4c5ff",
+              error: "#ba1a1a",
+              "inverse-surface": "#213145",
+              "primary-fixed-dim": "#bec6e0",
+              "surface-container-lowest": "#ffffff",
+              "tertiary-fixed-dim": "#dec29a",
+              "on-secondary-fixed": "#00174b",
+              "surface-dim": "#cbdbf5",
+              "on-tertiary-fixed-variant": "#574425",
+              "on-secondary": "#ffffff",
+              "on-background": "#0b1c30",
+              "surface-tint": "#565e74",
+              tertiary: "#000000",
+              "secondary-fixed": "#dbe1ff",
+              "outline-variant": "#c6c6cd",
+              "on-primary": "#ffffff",
+              secondary: "#0051d5",
+              "surface-container-highest": "#d3e4fe",
+              "surface-bright": "#f8f9ff",
+              background: "#f8f9ff",
+              "on-tertiary-fixed": "#271901"
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px"
+            },
+            spacing: {
+              sidebar_width: "260px",
+              md: "16px",
+              lg: "24px",
+              xs: "8px",
+              xl: "32px",
+              sm: "12px",
+              gutter: "20px",
+              base: "4px"
+            },
+            fontFamily: {
+              "title-sm": ["Inter"],
+              "body-md": ["Inter"],
+              "headline-md": ["Inter"],
+              "body-sm": ["Inter"],
+              "label-caps": ["Inter"],
+              "display-lg": ["Inter"],
+              "data-mono": ["JetBrains Mono"]
+            },
+            fontSize: {
+              "title-sm": ["18px", { lineHeight: "24px", fontWeight: "600" }],
+              "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }],
+              "headline-md": ["24px", { lineHeight: "32px", fontWeight: "600" }],
+              "body-sm": ["13px", { lineHeight: "18px", fontWeight: "400" }],
+              "label-caps": ["11px", { lineHeight: "16px", letterSpacing: "0.05em", fontWeight: "700" }],
+              "display-lg": ["32px", { lineHeight: "40px", fontWeight: "700" }],
+              "data-mono": ["13px", { lineHeight: "16px", fontWeight: "500" }]
+            }
+          }
+        }
+      };
+    </script>
+    <link rel="stylesheet" href="/static/mobile.css?v=restart-demo-1" />
+  </head>
+  <body class="bg-background text-on-background min-h-screen font-body-md">
+    <button id="restartDemoButton" class="demo-restart-button" type="button" aria-label="Restart demo and return to manager dashboard">
+      <span class="demo-restart-kicker">Demo control</span>
+      <span class="demo-restart-main">
+        <span class="material-symbols-outlined">restart_alt</span>
+        Restart Demo
+      </span>
+    </button>
+
+    <div id="todayScreen" class="mobile-screen bg-background text-on-background min-h-screen flex flex-col font-body-md pb-md w-[390px] h-[844px] overflow-y-auto mx-auto">
+      <header class="bg-surface text-primary shadow-sm flex justify-between items-center px-md py-xs w-full sticky top-0 z-50">
+        <button class="hover:bg-surface-container-low p-2 rounded-full transition-colors flex items-center justify-center text-on-surface-variant" type="button" aria-label="Menu">
+          <span class="material-symbols-outlined">menu</span>
+        </button>
+        <div class="flex flex-col items-center">
+          <span class="font-display-lg text-display-lg tracking-tight text-primary leading-tight">FINELINE</span>
+          <span class="font-label-caps text-label-caps text-on-surface-variant">Logistics Operations</span>
+        </div>
+        <button class="hover:bg-surface-container-low p-2 rounded-full transition-colors flex items-center justify-center text-on-surface-variant" type="button" aria-label="Notifications">
+          <span class="material-symbols-outlined">notifications</span>
+        </button>
+      </header>
+
+      <main class="flex-1 px-md py-lg flex flex-col gap-lg">
+        <section class="flex items-start">
+          <div class="min-w-0">
+            <h1 class="font-headline-md text-headline-md text-on-surface">Good Morning, <span id="todayDriverName">דביר לוי</span></h1>
+            <p id="todayDate" class="font-body-md text-body-md text-on-surface-variant mt-1">Loading route</p>
+          </div>
+        </section>
+
+        <section class="bg-surface-container-lowest rounded-xl shadow-[0px_1px_3px_rgba(15,23,42,0.08)] p-md border border-surface-variant">
+          <div class="flex justify-between items-center mb-md border-b border-surface-variant pb-sm">
+            <h2 class="font-title-sm text-title-sm text-on-surface">Today's Route</h2>
+            <span id="todayShiftType" class="font-label-caps text-label-caps text-on-surface-variant bg-surface px-2 py-1 rounded">Shift</span>
+          </div>
+          <div class="grid grid-cols-2 gap-md mb-lg">
+            <div class="flex flex-col gap-1">
+              <span class="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-1">
+                <span class="material-symbols-outlined text-[16px]">local_shipping</span> Stops
+              </span>
+              <span id="todayStops" class="font-display-lg text-display-lg text-on-surface">--</span>
+            </div>
+            <div class="flex flex-col gap-1">
+              <span class="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-1">
+                <span class="material-symbols-outlined text-[16px]">schedule</span> Duration
+              </span>
+              <span id="todayDuration" class="font-display-lg text-display-lg text-on-surface">--</span>
+            </div>
+            <div class="flex flex-col gap-1">
+              <span class="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-1">
+                <span class="material-symbols-outlined text-[16px]">route</span> Distance
+              </span>
+              <span class="font-display-lg text-display-lg text-on-surface"><span id="todayDistance">--</span> <span class="text-title-sm">km</span></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="rounded-xl overflow-hidden shadow-[0px_1px_3px_rgba(15,23,42,0.08)] border border-surface-variant bg-surface-container-lowest relative h-[200px]">
+          <div id="todayMap" class="w-full h-full"></div>
+          <div class="absolute inset-0 bg-gradient-to-t from-surface-container-lowest/80 to-transparent pointer-events-none"></div>
+          <div class="absolute bottom-sm left-sm right-sm bg-surface/90 backdrop-blur-sm p-sm rounded-lg border border-surface-variant flex items-center justify-between z-[500]">
+            <div class="flex items-center gap-sm min-w-0">
+              <div class="bg-secondary text-on-secondary w-8 h-8 rounded-full flex items-center justify-center font-title-sm text-title-sm shadow-sm">1</div>
+              <div class="min-w-0">
+                <p class="font-label-caps text-label-caps text-on-surface-variant">First Delivery Stop</p>
+                <p id="todayFirstStop" class="font-body-md text-body-md text-on-surface font-medium truncate" dir="rtl">Loading</p>
+              </div>
+            </div>
+            <div class="text-right">
+              <p class="font-label-caps text-label-caps text-on-surface-variant">ETA</p>
+              <p id="todayEta" class="font-data-mono text-data-mono text-primary font-bold">--:--</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="flex flex-col gap-sm mt-2">
+          <button id="startRouteButton" class="w-full bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-title-sm text-title-sm py-4 rounded-lg shadow-[0px_10px_15px_-3px_rgba(15,23,42,0.1)] transition-colors flex justify-center items-center gap-2" type="button">
+            <span class="material-symbols-outlined">play_arrow</span>
+            Start Route
+          </button>
+          <div class="grid grid-cols-2 gap-sm">
+            <button id="viewStopsButton" class="w-full bg-surface-container-lowest hover:bg-surface-container-low border border-[#64748B] text-[#64748B] font-body-md text-body-md py-3 rounded-lg transition-colors flex justify-center items-center gap-2" type="button">
+              <span class="material-symbols-outlined text-[18px]">format_list_bulleted</span>
+              View All Stops
+            </button>
+            <button class="w-full bg-surface-container-lowest hover:bg-surface-container-low border border-[#64748B] text-[#64748B] font-body-md text-body-md py-3 rounded-lg transition-colors flex justify-center items-center gap-2" type="button">
+              <span class="material-symbols-outlined text-[18px]">support_agent</span>
+              Contact Dispatch
+            </button>
+          </div>
+        </section>
+      </main>
+
+    </div>
+
+    <div id="activeScreen" class="mobile-screen hidden bg-background text-on-background h-full font-body-md antialiased overflow-hidden flex flex-col w-[390px] h-[844px] mx-auto relative">
+      <header class="bg-surface shadow-sm flex items-center justify-between px-md py-sm w-[390px] z-50 fixed top-0 left-1/2 -translate-x-1/2">
+        <div class="flex items-center gap-xs">
+          <button id="activeBackButton" class="p-xs hover:bg-surface-container-low rounded-full active:opacity-80 transition-opacity flex items-center justify-center text-on-surface-variant" type="button" aria-label="Back to today route">
+            <span class="material-symbols-outlined">arrow_back</span>
+          </button>
+          <div class="flex flex-col">
+            <span class="font-label-caps text-label-caps text-on-surface-variant uppercase">FINELINE DRIVER APP</span>
+            <span class="font-title-sm text-title-sm text-secondary">Active Route</span>
+          </div>
+        </div>
+        <div class="flex items-center">
+          <span class="bg-surface-container-high text-on-surface-variant px-xs py-base rounded-full font-label-caps text-label-caps flex items-center gap-base border border-outline-variant">
+            <span class="w-2 h-2 rounded-full bg-secondary"></span>
+            In Progress
+          </span>
+        </div>
+      </header>
+
+      <main class="flex-1 mt-[64px] mb-[64px] overflow-y-auto pb-[100px]">
+        <section class="px-md py-sm bg-surface">
+          <div class="flex justify-between items-end mb-xs">
+            <h2 id="activeStopCount" class="font-title-sm text-title-sm text-on-surface">Stop 1 of --</h2>
+            <span id="activeRemaining" class="font-body-sm text-body-sm text-on-surface-variant">-- stops remaining</span>
+          </div>
+          <div class="w-full bg-surface-container-highest rounded-full h-2 overflow-hidden">
+            <div id="activeProgressBar" class="bg-secondary h-2 rounded-full" style="width: 0%"></div>
+          </div>
+        </section>
+
+        <section class="w-full h-[250px] relative bg-surface-variant">
+          <div id="activeMap" class="absolute inset-0"></div>
+          <div class="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent pointer-events-none"></div>
+          <div class="absolute bottom-md right-md flex flex-col gap-xs z-[500]">
+            <button id="recenterButton" class="w-10 h-10 bg-surface text-on-surface rounded-full shadow-lg flex items-center justify-center border border-outline-variant" type="button" aria-label="Recenter map">
+              <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">my_location</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="px-md py-sm -mt-md relative z-10">
+          <div class="bg-surface rounded-xl shadow-[0_10px_15px_-3px_rgba(15,23,42,0.1)] border border-surface-container-high p-md">
+            <div class="flex justify-between items-start mb-md border-b border-surface-container-high pb-sm">
+              <div class="flex flex-col min-w-0">
+                <span class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider mb-base">Next Delivery Stop</span>
+                <div class="flex items-center gap-xs text-on-surface min-w-0">
+                  <span class="material-symbols-outlined text-secondary">location_on</span>
+                  <h3 id="activeStopAddress" class="font-title-sm text-title-sm truncate" dir="rtl">Loading</h3>
+                </div>
+              </div>
+              <div class="text-right">
+                <span id="activeEta" class="font-data-mono text-data-mono text-secondary bg-surface-container-low px-xs py-base rounded-md">ETA: --:--</span>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-sm mb-md">
+              <div class="flex flex-col">
+                <span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Order ID</span>
+                <span id="activeOrderId" class="font-data-mono text-data-mono text-on-surface">#00000</span>
+              </div>
+              <div class="flex flex-col text-right">
+                <span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Items</span>
+                <span class="font-body-sm text-body-sm text-on-surface font-medium">1 Package</span>
+              </div>
+            </div>
+            <div class="bg-tertiary-fixed-dim/20 p-sm rounded-lg flex gap-xs items-start border border-tertiary-fixed-dim/30 mb-md">
+              <span class="material-symbols-outlined text-on-tertiary-fixed-variant text-lg">info</span>
+              <p class="font-body-sm text-body-sm text-on-tertiary-fixed-variant">Call upon arrival</p>
+            </div>
+            <div class="flex flex-col gap-sm">
+              <button id="navigateButton" class="w-full bg-secondary text-on-secondary font-body-md font-semibold py-sm rounded-lg flex items-center justify-center gap-xs hover:bg-secondary/90 transition-colors" type="button">
+                <span class="material-symbols-outlined">navigation</span>
+                Navigate to Stop
+              </button>
+              <button id="detailsButton" class="w-full bg-transparent text-secondary font-body-sm font-medium py-sm rounded-lg flex items-center justify-center border border-outline-variant hover:bg-surface-container-low transition-colors" type="button">
+                View Stop Details
+              </button>
+            </div>
+          </div>
+          <div class="mt-md text-center">
+            <button id="remainingStopsButton" class="font-body-sm text-body-sm text-secondary underline hover:text-on-secondary-fixed-variant transition-colors" type="button">View Remaining Stops</button>
+          </div>
+          <ol id="remainingStopsList" class="remaining-list hidden mt-md bg-surface rounded-xl border border-surface-container-high overflow-hidden"></ol>
+        </section>
+      </main>
+
+      <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-[390px] bg-surface shadow-[0_-10px_20px_rgba(15,23,42,0.05)] p-md border-t border-surface-container-high z-50">
+        <button id="arrivedButton" class="w-full bg-primary-container text-on-primary font-title-sm text-title-sm py-[14px] rounded-xl flex items-center justify-center gap-sm shadow-lg hover:bg-primary-container/90 transition-all active:scale-[0.98]" type="button">
+          <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+          I've Arrived
+        </button>
+      </div>
+    </div>
+
+    <div id="routeError" class="hidden fixed inset-x-0 top-4 mx-auto w-[360px] bg-error-container text-on-error-container border border-error/30 rounded-lg p-md shadow-lg z-[1000] font-body-sm text-body-sm"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/static/mobile.js?v=dashboard-first-1"></script>
+  </body>
+</html>

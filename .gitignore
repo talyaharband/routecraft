@@ -87,6 +87,10 @@ cmake-build-*/
 out/
 addresses/out/
 runs/
+!runs/
+runs/*
+!runs/results_for_comparison/
+!runs/results_for_comparison/**
 
 ~$*.xlsx
 ~$*.xls

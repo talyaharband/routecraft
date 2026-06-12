@@ -1,0 +1,283 @@
+============================================================
+LOADING DATA
+============================================================
+Loaded 210 selected rows for constrained delivery planning
+Drivers: 6
+Capacity per driver load: 50
+Ideal shift minutes: 420
+Max shift minutes: 600
+Warehouse: WAREHOUSE ESHTAOL
+Warehouse address: Eshtaol, Israel
+Warehouse coordinates: 31.779275, 35.010588
+Warehouse coordinate source: default_coordinates
+
+============================================================
+STARTING MULTI-VEHICLE TSP JOURNEY (CONSTRAINT PRODUCTION)
+============================================================
+
+============================================================
+STARTING SHIFT FOR DRIVER 1
+============================================================
+
+Next Target: נחל הראל 17, אשתאול | City: אשתאול | Cluster: 4 | Load 1 packages: 0/50 | Time: 0.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 2.00 min; 2-opt cost 2.00 min; ending at נחל הראל 17, אשתאול.
+Route: WAREHOUSE ESHTAOL → נחל הראל 17
+Travel: 2.00 min | Delivery: 4.00 min | Source: origin_cache | Shift time: 6.00 min | Load packages: 1/50
+City 'אשתאול' is complete. Searching globally for next city.
+
+Next Target: דם המכבים 23, בית שמש | City: בית שמש | Cluster: 6 | Load 1 packages: 1/50 | Time: 6.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 56.00 min; 2-opt cost 55.00 min; ending at אילפא 14, בית שמש.
+Route: נחל הראל 17 → דם המכבים 23 → עמק הזיתים 2 → נחל דולב 39 → נחל נועם 16 → נחל איילון 25 → נריה הנביא 12 → עידו הנביא 4 → יואל הנביא 22 → יואל הנביא 24 → רבינא 9 → רבינא 12 → אביי 30 → רב אשי 4 → רב חלקיה בר טובי 18 → אילפא 14
+Travel: 55.00 min | Delivery: 60.00 min | Source: origin_cache + matrix | Shift time: 121.00 min | Load packages: 16/50
+City 'בית שמש' is complete. Searching globally for next city.
+
+Next Target: כרמל 11, יד בנימין | City: יד בנימין | Cluster: 10 | Load 1 packages: 16/50 | Time: 121.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 32.00 min; 2-opt cost 32.00 min; ending at כרמל 11, יד בנימין.
+Route: אילפא 14 → כרמל 11
+Travel: 32.00 min | Delivery: 4.00 min | Source: origin_cache | Shift time: 157.00 min | Load packages: 17/50
+City 'יד בנימין' is complete. Searching globally for next city.
+
+Next Target: יגאל אלון 4, רמלה | City: רמלה | Cluster: 28 | Load 1 packages: 17/50 | Time: 157.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 21.00 min; 2-opt cost 21.00 min; ending at יגאל אלון 4, רמלה.
+Route: כרמל 11 → יגאל אלון 4
+Travel: 21.00 min | Delivery: 4.00 min | Source: origin_cache | Shift time: 182.00 min | Load packages: 18/50
+City 'רמלה' is complete. Searching globally for next city.
+
+Next Target: בעל התניא 9, לוד | City: לוד | Cluster: 13 | Load 1 packages: 18/50 | Time: 182.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 69.00 min; 2-opt cost 61.00 min; ending at צמח צדק 5, לוד.
+Route: יגאל אלון 4 → הרב אלישיב 4 → הרב אלישיב 6 → יחד שבטי ישראל 8 → יעקב אבינו 2 → יעקב אבינו 8 → יעקב אבינו 10 → שבט אשר 5 → שבט אשר 5 → שבט אשר 7 → שבט אשר 7 → שבט אשר 7 → שבט אשר 11 → שבט גד 4 → שבט גד 6 → שבט גד 10 → שבט יהודה 3 → שבט יהודה 3 → שבט יהודה 3 → שבט יהודה 3 → שבט יהודה 7 → שבט יהודה 8 → יחד שבטי ישראל 12 → יחד שבטי ישראל 12 → יחד שבטי ישראל 14 → יחד שבטי ישראל 14 → יחד שבטי ישראל 34 → יחד שבטי ישראל 40 → יחד שבטי ישראל 40 → הרב עובדיה יוסף 10 → שבט אפרים 2 → שבט אפרים 3 → שבט אפרים 8
+Travel: 18.00 min | Delivery: 128.00 min | Source: origin_cache + matrix | Shift time: 328.00 min | Load packages: 50/50
+Driver 1 capacity is full, so the last delivery segment was re-optimized as a closed route back to WAREHOUSE ESHTAOL. Shift time: 351.00 min.
+
+Next Target: בעל התניא 9, לוד | City: לוד | Cluster: 13 | Load 2 packages: 0/50 | Time: 351.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 67.00 min; 2-opt cost 62.00 min; ending at צמח צדק 5, לוד.
+Route: WAREHOUSE ESHTAOL → ישראל זמורה 46 → יחד שבטי ישראל 46 → לאה אימנו 14 → משה רבנו 4 → משה רבנו 6 → משה רבנו 8 → משה רבנו 8 → שבט מנשה 3 → שבט מנשה 3 → שבט זבולון 5 → שבט זבולון 11 → שבט זבולון 15 → שבט זבולון 21 → רבקה אימנו 43 → בעל התניא 9 → יוספטל 23 → פנקס 7 → ורדים 2 → שייטת 3 → הצנחנים 12 → צמח צדק 5 → צמח צדק 5 → צמח צדק 13 → צמח צדק 13 → צמח צדק 18
+Travel: 62.00 min | Delivery: 100.00 min | Source: origin_cache + matrix | Shift time: 513.00 min | Load packages: 25/50
+City 'לוד' is complete. Searching globally for next city.
+Driver 1 reached/passed ideal shift (513.00 >= 420). Ending shift.
+
+SHIFT COMPLETE - DRIVER 1
+Time worked: 513.00 mins (8.55 hours)
+Addresses delivered: 75
+
+============================================================
+STARTING SHIFT FOR DRIVER 2
+============================================================
+
+Next Target: עצמונה 1, מבוא חורון | City: מבוא חורון | Cluster: 14 | Load 1 packages: 0/50 | Time: 0.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 16.00 min; 2-opt cost 16.00 min; ending at עצמונה 1, מבוא חורון.
+Route: WAREHOUSE ESHTAOL → עצמונה 1 → עצמונה 1
+Travel: 16.00 min | Delivery: 8.00 min | Source: google | Shift time: 24.00 min | Load packages: 2/50
+City 'מבוא חורון' is complete. Searching globally for next city.
+
+Next Target: ישועת דוד 10, מודיעין עילית | City: מודיעין עילית | Cluster: 17 | Load 1 packages: 2/50 | Time: 24.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 69.00 min; 2-opt cost 65.00 min; ending at רשב"א 10, מודיעין עילית.
+Route: עצמונה 1 → ישועת דוד 10 → קהילת יעקב 5 → קהילת יעקב 5 → קהילת יעקב 5 → עיון התלמוד 6 → חזון אי"ש 21 → חזון אי"ש 21 → חזון אי"ש 25 → חזון אי"ש 25 → חזון אי"ש 15 → חזון אי"ש 17 → חזון אי"ש 18 → אבי עזרי 6 → אבי עזרי 10 → אבי עזרי 12 → אבי עזרי 18 → חזון אי"ש 7 → חזון אי"ש 7 → חזון אי"ש 10 → זכרון שמואל 4 → אשר לשלמה 1 → הרב מפוניביז 1 → הרב מפוניביז 1 → הרב מפוניביז 4 → נתיבות שלום 1 → נתיבות שלום 2 → נתיבות שלום 18 → הריטב"א 26 → הריטב"א 5 → הריטב"א 6 → הריטב"א 7 → הריטב"א 8 → הריטב"א 10 → רמב"ם 34 → רמב"ם 2 → רמב"ם 18 → רמב"ם 18 → רמב"ם 18 → רמב"ם 18 → מהרי"ל 24 → המאירי 8 → רשב"ם 4 → רשב"ם 12 → רשבם 3 → רשב"א 10 → רשב"א 16 → רשב"א 27
+Travel: 65.00 min | Delivery: 188.00 min | Source: google + matrix | Shift time: 277.00 min | Load packages: 49/50
+
+Next Target: נתיבות המשפט 3, מודיעין עילית | City: מודיעין עילית | Cluster: 18 | Load 1 packages: 49/50 | Time: 277.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 38.00 min; 2-opt cost 38.00 min; ending at נתיבות המשפט 3, מודיעין עילית.
+Split אבני נזר 6, מודיעין עילית across loads: taking 1 packages now and leaving 1 for the next load.
+Route: רשב"א 27 → אבני נזר 6
+Travel: 4.00 min | Delivery: 4.00 min | Source: google + matrix | Shift time: 285.00 min | Load packages: 50/50
+Driver 2 capacity is full, so the last delivery segment was re-optimized as a closed route back to WAREHOUSE ESHTAOL. Shift time: 317.00 min.
+
+Next Target: Rabi Yehuda ha-Nasi Street 37, מודיעין עילית | City: מודיעין עילית | Cluster: 18 | Load 2 packages: 0/50 | Time: 317.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 66.00 min; 2-opt cost 66.00 min; ending at משך חכמה 2, מודיעין עילית.
+Split רבי עקיבא 7, מודיעין עילית across loads: taking 5 packages now and leaving 1 for the next load.
+Route: WAREHOUSE ESHTAOL → יחזקאל 5 → יחזקאל 5 → יחזקאל 5 → יחזקאל 9 → יחזקאל 13 → יחזקאל 15 → יחזקאל 15 → רבי שמעון בר יוחאי 3 → רבי שמעון בר יוחאי 3 → רב ושמואל 3 → רבי יהודה הנשיא 4 → רבי יהודה הנשיא 13 → רבי יהודה הנשיא 20 → רבי יהודה הנשיא 21 → רבי יהודה הנשיא 23 → רבי יהודה הנשיא 25 → Rabi Yehuda ha-Nasi Street 37 → Rabi Yehuda ha-Nasi Street 39 → רבי יהודה הנשיא 26 → רבי יהודה הנשיא 26 → רבי יהודה הנשיא 28 → רבי יהודה הנשיא 30 → רבי יהודה הנשיא 32 → רבי יהודה הנשיא 33 → רבי יהודה הנשיא 35 → רבי יהודה הנשיא 35 → רבי יהודה הנשיא 35 → רבי יהודה הנשיא 37 → רבי יהודה הנשיא 41 → רבי יהודה הנשיא 41 → רבי יהודה הנשיא 43 → רבי יהודה הנשיא 43 → רבי יהודה הנשיא 43 → רבי עקיבא 34 → רבי עקיבא 38 → רבי עקיבא 14 → רבי עקיבא 14 → רבי עקיבא 15 → רבי עקיבא 15 → רבי עקיבא 16 → רבי עקיבא 17 → רבי עקיבא 18 → רבי עקיבא 18 → רבי עקיבא 19 → רבי עקיבא 21 → רבי עקיבא 7 → רבי עקיבא 7 → רבי עקיבא 8 → רבי עקיבא 10 → רבי עקיבא 11
+Travel: 46.00 min | Delivery: 200.00 min | Source: origin_cache + matrix | Shift time: 563.00 min | Load packages: 50/50
+Driver 2 reached/passed ideal shift (563.00 >= 420). Ending shift.
+
+SHIFT COMPLETE - DRIVER 2
+Time worked: 563.00 mins (9.38 hours)
+Addresses delivered: 100
+
+============================================================
+STARTING SHIFT FOR DRIVER 3
+============================================================
+
+Next Target: אבני נזר 20, מודיעין עילית | City: מודיעין עילית | Cluster: 18 | Load 1 packages: 0/50 | Time: 0.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 59.00 min; 2-opt cost 59.00 min; ending at רבי עקיבא 7, מודיעין עילית.
+Route: WAREHOUSE ESHTAOL → משך חכמה 23 → משך חכמה 44 → משך חכמה 60 → משך חכמה 62 → משך חכמה 64 → משך חכמה 76 → משך חכמה 2 → משך חכמה 4 → אור החיים 14 → אור החיים 17 → אור החיים 17 → אור החיים 18 → אור החיים 5 → נתיבות המשפט 3 → נתיבות המשפט 3 → נתיבות המשפט 3 → נתיבות המשפט 8 → נתיבות המשפט 13 → נודע ביהודה 6 → אבני נזר 12 → אבני נזר 20 → אבני נזר 20 → אבני נזר 21 → אבני נזר 22 → שדי חמד 15 → שדי חמד 28 → רבי שמעון בר יוחאי 12 → רבי שמעון בר יוחאי 14 → רבי שמעון בר יוחאי 18 → רבי שמעון בר יוחאי 20 → רבי שמעון בר יוחאי 22 → רבי שמעון בר יוחאי 22 → רבי שמעון בר יוחאי 22 → רבי שמעון בר יוחאי 23 → רבי שמעון בר יוחאי 24 → רבי שמעון בר יוחאי 27 → רבי שמעון בר יוחאי 27 → רבי שמעון בר יוחאי 28 → רבי שמעון בר יוחאי 28 → רבי שמעון בר יוחאי 32 → רבי שמעון בר יוחאי 36 → רבי שמעון בר יוחאי 36 → רבי שמעון בר יוחאי 37 → רבי שמעון בר יוחאי 38 → רבי שמעון בר יוחאי 43 → רבי שמעון בר יוחאי 45 → רבי שמעון בר יוחאי 46 → רבי שמעון בר יוחאי 49 → רבי שמעון בר יוחאי 51 → רבי שמעון בר יוחאי 51
+Travel: 55.00 min | Delivery: 200.00 min | Source: origin_cache + matrix | Shift time: 255.00 min | Load packages: 50/50
+Driver 3 capacity is full, so the last delivery segment was re-optimized as a closed route back to WAREHOUSE ESHTAOL. Shift time: 287.00 min.
+
+Next Target: רבי עקיבא 22, מודיעין עילית | City: מודיעין עילית | Cluster: 18 | Load 2 packages: 0/50 | Time: 287.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 38.00 min; 2-opt cost 38.00 min; ending at רבי עקיבא 7, מודיעין עילית.
+Route: WAREHOUSE ESHTAOL → רבי עקיבא 22 → רבי עקיבא 24 → רבי עקיבא 28 → רבי עקיבא 12
+Travel: 38.00 min | Delivery: 16.00 min | Source: origin_cache + matrix | Shift time: 341.00 min | Load packages: 4/50
+
+Next Target: אבני נזר 28, מודיעין עילית | City: מודיעין עילית | Cluster: 16 | Load 2 packages: 4/50 | Time: 341.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 50.00 min; 2-opt cost 49.00 min; ending at הרמב"ם 32, מודיעין עילית.
+Split מרומי שדה 44, מודיעין עילית across loads: taking 1 packages now and leaving 1 for the next load.
+Route: רבי עקיבא 12 → אבני נזר 28 → אבני נזר 30 → אבני נזר 30 → אבני נזר 41 → שדי חמד 34 → חזון דוד 9 → חזון דוד 9 → חזון דוד 17 → חזון דוד 23 → חזון דוד 25 → חזון דוד 27 → חזון דוד 3 → נתיבות המשפט 107 → שערי תשובה 6 → שערי תשובה 6 → שערי תשובה 6 → שערי תשובה 8 → חפץ חיים 21 → חפץ חיים 21 → חפץ חיים 22 → חפץ חיים 22 → חפץ חיים 11 → מסילת יוסף 14 → מסילת יוסף 14 → מסילת יוסף 14 → מסילת יוסף 11 → מסילת יוסף 17 → מסילת יוסף 24 → מסילת יוסף 24 → מסילת יוסף 28 → מסילת יוסף 28 → מסילת יוסף 44 → מסילת יוסף 50 → מסילת יוסף 50 → מסילת יוסף 54 → מרומי שדה 15 → מרומי שדה 3 → מרומי שדה 5 → מרומי שדה 9 → מרומי שדה 9 → מרומי שדה 10 → מרומי שדה 14 → מרומי שדה 16 → מרומי שדה 17 → מרומי שדה 22 → מרומי שדה 44
+Travel: 29.00 min | Delivery: 184.00 min | Source: google + matrix | Shift time: 554.00 min | Load packages: 50/50
+Driver 3 reached/passed ideal shift (554.00 >= 420). Ending shift.
+
+SHIFT COMPLETE - DRIVER 3
+Time worked: 554.00 mins (9.23 hours)
+Addresses delivered: 100
+
+============================================================
+STARTING SHIFT FOR DRIVER 4
+============================================================
+
+Next Target: הרמב"ם 32, מודיעין עילית | City: מודיעין עילית | Cluster: 16 | Load 1 packages: 0/50 | Time: 0.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 52.00 min; 2-opt cost 51.00 min; ending at שאגת אריה 1, מודיעין עילית.
+Route: WAREHOUSE ESHTAOL → הרמב"ם 32 → נתיבות המשפט 93 → נתיבות המשפט 93 → נתיבות המשפט 97 → נתיבות המשפט 97 → נתיבות המשפט 99 → נתיבות המשפט 71 → נתיבות המשפט 71 → נתיבות המשפט 71 → נתיבות המשפט 71 → נתיבות המשפט 30 → נתיבות המשפט 32 → נתיבות המשפט 38 → נתיבות המשפט 42 → נתיבות המשפט 59 → נתיבות המשפט 65 → נתיבות המשפט 67 → נתיבות המשפט 67 → נתיבות המשפט 79 → נתיבות המשפט 85 → נתיבות המשפט 85 → נתיבות המשפט 85 → נתיבות המשפט 87 → נתיבות המשפט 88 → נתיבות המשפט 89 → מרומי שדה 44 → קצות החושן 17 → קצות החושן 18 → קצות החושן 20 → קצות החושן 20 → קצות החושן 21 → קצות החושן 21 → קצות החושן 24 → קצות החושן 9 → קצות החושן 10 → קצות החושן 14 → קצות החושן 1 → קצות החושן 2 → קצות החושן 5 → קצות החושן 8 → שאגת אריה 1 → שאגת אריה 3 → שאגת אריה 7 → שאגת אריה 7 → שאגת אריה 15 → שאגת אריה 15 → שאגת אריה 19 → שאגת אריה 19 → שאגת אריה 19 → שאגת אריה 21
+Travel: 51.00 min | Delivery: 200.00 min | Source: origin_cache + matrix | Shift time: 251.00 min | Load packages: 50/50
+City 'מודיעין עילית' is complete. Searching globally for next city.
+Driver 4 capacity is full, so the last delivery segment was re-optimized as a closed route back to WAREHOUSE ESHTAOL. Shift time: 284.00 min.
+
+Next Target: תירוש 560, ירושלים | City: ירושלים | Cluster: 11 | Load 2 packages: 0/50 | Time: 284.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 46.00 min; 2-opt cost 46.00 min; ending at תירוש 560, ירושלים.
+Route: WAREHOUSE ESHTAOL → אמרי בינה 14 → תירוש 560
+Travel: 46.00 min | Delivery: 8.00 min | Source: origin_cache + matrix | Shift time: 338.00 min | Load packages: 2/50
+City 'ירושלים' is complete. Searching globally for next city.
+
+Next Target: Rabbi Akiva Street 28, מודיעין | City: מודיעין | Cluster: 15 | Load 2 packages: 2/50 | Time: 338.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 56.00 min; 2-opt cost 56.00 min; ending at Rabbi Akiva Street 28, מודיעין.
+Route: תירוש 560 → Rabbi Akiva Street 28
+Travel: 56.00 min | Delivery: 4.00 min | Source: google | Shift time: 398.00 min | Load packages: 3/50
+City 'מודיעין' is complete. Searching globally for next city.
+
+Next Target: הרב המאירי 11, אלעד | City: אלעד | Cluster: 1 | Load 2 packages: 3/50 | Time: 398.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 40.00 min; 2-opt cost 40.00 min; ending at הרב המאירי 11, אלעד.
+Route: Rabbi Akiva Street 28 → רשב"ם 10 → הרב המאירי 11
+Travel: 40.00 min | Delivery: 8.00 min | Source: google + matrix | Shift time: 446.00 min | Load packages: 5/50
+City 'אלעד' is complete. Searching globally for next city.
+Driver 4 reached/passed ideal shift (446.00 >= 420). Ending shift.
+
+SHIFT COMPLETE - DRIVER 4
+Time worked: 446.00 mins (7.43 hours)
+Addresses delivered: 55
+
+============================================================
+STARTING SHIFT FOR DRIVER 5
+============================================================
+
+Next Target: רבי מאיר בעל הנס 46, באר יעקב | City: באר יעקב | Cluster: 5 | Load 1 packages: 0/50 | Time: 0.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 33.00 min; 2-opt cost 33.00 min; ending at רבי מאיר בעל הנס 46, באר יעקב.
+Route: WAREHOUSE ESHTAOL → רבי מאיר בעל הנס 46
+Travel: 33.00 min | Delivery: 4.00 min | Source: google | Shift time: 37.00 min | Load packages: 1/50
+City 'באר יעקב' is complete. Searching globally for next city.
+
+Next Target: יבנה 14, חולון | City: חולון | Cluster: 8 | Load 1 packages: 1/50 | Time: 37.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 24.00 min; 2-opt cost 24.00 min; ending at יבנה 14, חולון.
+Route: רבי מאיר בעל הנס 46 → יבנה 14
+Travel: 24.00 min | Delivery: 4.00 min | Source: google | Shift time: 65.00 min | Load packages: 2/50
+City 'חולון' is complete. Searching globally for next city.
+
+Next Target: יחזקאל דנין 27, בת ים | City: בת ים | Cluster: 7 | Load 1 packages: 2/50 | Time: 65.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 12.00 min; 2-opt cost 12.00 min; ending at יחזקאל דנין 27, בת ים.
+Route: יבנה 14 → יחזקאל דנין 27
+Travel: 12.00 min | Delivery: 4.00 min | Source: google | Shift time: 81.00 min | Load packages: 3/50
+City 'בת ים' is complete. Searching globally for next city.
+
+Next Target: יונה גרין 3, פתח תקווה | City: פתח תקווה | Cluster: 22 | Load 1 packages: 3/50 | Time: 81.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 32.00 min; 2-opt cost 32.00 min; ending at הרב אונטרמן 9, פתח תקווה.
+Route: יחזקאל דנין 27 → יונה גרין 3 → הרב אונטרמן 9
+Travel: 32.00 min | Delivery: 8.00 min | Source: google + matrix | Shift time: 121.00 min | Load packages: 5/50
+City 'פתח תקווה' is complete. Searching globally for next city.
+
+Next Target: הנרקיס 14, אלישמע | City: אלישמע | Cluster: 0 | Load 1 packages: 5/50 | Time: 121.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 13.00 min; 2-opt cost 13.00 min; ending at הנרקיס 14, אלישמע.
+Route: הרב אונטרמן 9 → הנרקיס 14
+Travel: 13.00 min | Delivery: 4.00 min | Source: google | Shift time: 138.00 min | Load packages: 6/50
+City 'אלישמע' is complete. Searching globally for next city.
+
+Next Target: דרך אפולוניה 43, רכסים | City: רכסים | Cluster: 27 | Load 1 packages: 6/50 | Time: 138.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 64.00 min; 2-opt cost 64.00 min; ending at הרב עוזיאל 18, רכסים.
+Route: הנרקיס 14 → דרך אפולוניה 43 → הרב עוזיאל 4 → הרב עוזיאל 18 → הרב עוזיאל 21
+Travel: 64.00 min | Delivery: 16.00 min | Source: google + matrix | Shift time: 218.00 min | Load packages: 10/50
+
+Next Target: הרב קוק 11, רכסים | City: רכסים | Cluster: 26 | Load 1 packages: 10/50 | Time: 218.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 48.00 min; 2-opt cost 41.00 min; ending at חזון איש 47, רכסים.
+Split הכלניות 17, רכסים across loads: taking 5 packages now and leaving 2 for the next load.
+Route: הרב עוזיאל 21 → הרב שמעונוביץ 46 → הרב שמעונוביץ 46 → הרב שמעונוביץ 2 → הורדים 4 → הורדים 5 → הנרקיסים 24 → הנרקיסים 24 → הנרקיסים 28 → הנרקיסים 28 → הנרקיסים 30 → הנרקיסים 34 → מרגנית 11 → שעורה 1 → שעורה 14 → שעורה 14 → זית 6 → זית 13 → זית 13 → דקל 50 → דקל 60 → דקל 2 → סביון 37 → סביון 38 → סביון 38 → סביון 6 → סביון 10 → השיקמים 12 → סביון 24 → סביון 24 → הנרקיסים 4 → האירוסים 23 → האירוסים 4 → האירוסים 5 → בני תורה 95 → הכלניות 47 → הכלניות 17 → הכלניות 32 → הכלניות 32 → הכלניות 36 → הכלניות 37
+Travel: 23.00 min | Delivery: 160.00 min | Source: google + matrix | Shift time: 401.00 min | Load packages: 50/50
+Driver 5 would return to WAREHOUSE ESHTAOL at 477.00 min, reaching/passing the ideal shift. Keeping the open route and ending at the current stop.
+
+SHIFT COMPLETE - DRIVER 5
+Time worked: 401.00 mins (6.68 hours)
+Addresses delivered: 50
+
+============================================================
+STARTING SHIFT FOR DRIVER 6
+============================================================
+
+Next Target: הכלניות 1, רכסים | City: רכסים | Cluster: 26 | Load 1 packages: 0/50 | Time: 0.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 98.00 min; 2-opt cost 96.00 min; ending at חזון איש 47, רכסים.
+Route: WAREHOUSE ESHTAOL → הכלניות 1 → הכלניות 1 → הרימונים 10 → הרימונים 16 → הרימונים 24 → הרב קוק 26 → הרב קוק 31 → הרב קוק 11 → הרב קוק 12 → הרב קוק 14 → הרב קוק 20 → הכלניות 37 → הכלניות 38 → הרקפות 3 → הרקפות 3 → הרב עובדיה יוסף 1 → חזון איש 5 → חזון איש 13 → השקד 14 → השקד 50 → חזון איש 47 → חזון איש 47 → חזון איש 47 → חזון איש 47 → חזון איש 51 → חזון איש 53 → חזון איש 53
+Travel: 96.00 min | Delivery: 108.00 min | Source: origin_cache + matrix | Shift time: 204.00 min | Load packages: 27/50
+City 'רכסים' is complete. Searching globally for next city.
+
+Next Target: HaShkedim Street 1, קריית טבעון | City: קריית טבעון | Cluster: 25 | Load 1 packages: 27/50 | Time: 204.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 13.00 min; 2-opt cost 13.00 min; ending at HaShkedim Street 1, קריית טבעון.
+Route: חזון איש 53 → HaShkedim Street 1
+Travel: 13.00 min | Delivery: 4.00 min | Source: google | Shift time: 221.00 min | Load packages: 28/50
+City 'קריית טבעון' is complete. Searching globally for next city.
+
+Next Target: Ha-Atsma'ut Street 59, קריית אתא | City: קריית אתא | Cluster: 23 | Load 1 packages: 28/50 | Time: 221.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 21.00 min; 2-opt cost 21.00 min; ending at Ha-Atsma'ut Street 59, קריית אתא.
+Route: HaShkedim Street 1 → Ha-Atsma'ut Street 59
+Travel: 21.00 min | Delivery: 4.00 min | Source: google | Shift time: 246.00 min | Load packages: 29/50
+City 'קריית אתא' is complete. Searching globally for next city.
+
+Next Target: מורד הגיא 79, כרמיאל | City: כרמיאל | Cluster: 12 | Load 1 packages: 29/50 | Time: 246.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 34.00 min; 2-opt cost 34.00 min; ending at מורד הגיא 79, כרמיאל.
+Route: Ha-Atsma'ut Street 59 → מורד הגיא 79
+Travel: 34.00 min | Delivery: 4.00 min | Source: google | Shift time: 284.00 min | Load packages: 30/50
+City 'כרמיאל' is complete. Searching globally for next city.
+
+Next Target: ברוריה 3, טבריה | City: טבריה | Cluster: 9 | Load 1 packages: 30/50 | Time: 284.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 40.00 min; 2-opt cost 40.00 min; ending at ברוריה 3, טבריה.
+Route: מורד הגיא 79 → ברוריה 3
+Travel: 40.00 min | Delivery: 4.00 min | Source: google | Shift time: 328.00 min | Load packages: 31/50
+City 'טבריה' is complete. Searching globally for next city.
+
+Next Target: אסף שמחוני 77, עפולה | City: עפולה | Cluster: 21 | Load 1 packages: 31/50 | Time: 328.00/600 min
+Using open nearest-neighbor + 2-opt route. NN cost 48.00 min; 2-opt cost 48.00 min; ending at צאלון 22, עפולה.
+Route: ברוריה 3 → הרצל 24 → הרצל 10 → הרצל 16 → הרצל 19 → צבי פנקס 5 → צבי פנקס 8 → צבי פנקס 11 → אסף שמחוני 77 → יצחק שדה 65 → חיננית 13 → צאלון 22
+Travel: 48.00 min | Delivery: 44.00 min | Source: google + matrix | Shift time: 420.00 min | Load packages: 42/50
+Driver 6 reached/passed ideal shift (420.00 >= 420). Ending shift.
+
+SHIFT COMPLETE - DRIVER 6
+Time worked: 420.00 mins (7.00 hours)
+Addresses delivered: 42
+
+============================================================
+ALL DELIVERIES COMPLETE (CONSTRAINT PRODUCTION)
+============================================================
+
+SUMMARY:
+Driver 1: 75 addresses | 513.00 min (8.55 hours)
+Driver 2: 100 addresses | 563.00 min (9.38 hours)
+Driver 3: 100 addresses | 554.00 min (9.23 hours)
+Driver 4: 55 addresses | 446.00 min (7.43 hours)
+Driver 5: 50 addresses | 401.00 min (6.68 hours)
+Driver 6: 42 addresses | 420.00 min (7.00 hours)
+
+============================================================
+FULL ROUTES BY DRIVER
+============================================================
+
+Driver 1 Route:
+WAREHOUSE ESHTAOL → נחל הראל 17 → דם המכבים 23 → עמק הזיתים 2 → נחל דולב 39 → נחל נועם 16 → נחל איילון 25 → נריה הנביא 12 → עידו הנביא 4 → יואל הנביא 22 → יואל הנביא 24 → רבינא 9 → רבינא 12 → אביי 30 → רב אשי 4 → רב חלקיה בר טובי 18 → אילפא 14 → כרמל 11 → יגאל אלון 4 → הרב אלישיב 4 → הרב אלישיב 6 → יחד שבטי ישראל 8 → יעקב אבינו 2 → יעקב אבינו 8 → יעקב אבינו 10 → שבט אשר 5 → שבט אשר 5 → שבט אשר 7 → שבט אשר 7 → שבט אשר 7 → שבט אשר 11 → שבט גד 4 → שבט גד 6 → שבט גד 10 → שבט יהודה 3 → שבט יהודה 3 → שבט יהודה 3 → שבט יהודה 3 → שבט יהודה 7 → שבט יהודה 8 → יחד שבטי ישראל 12 → יחד שבטי ישראל 12 → יחד שבטי ישראל 14 → יחד שבטי ישראל 14 → יחד שבטי ישראל 34 → יחד שבטי ישראל 40 → יחד שבטי ישראל 40 → הרב עובדיה יוסף 10 → שבט אפרים 2 → שבט אפרים 3 → שבט אפרים 8 → WAREHOUSE ESHTAOL → ישראל זמורה 46 → יחד שבטי ישראל 46 → לאה אימנו 14 → משה רבנו 4 → משה רבנו 6 → משה רבנו 8 → משה רבנו 8 → שבט מנשה 3 → שבט מנשה 3 → שבט זבולון 5 → שבט זבולון 11 → שבט זבולון 15 → שבט זבולון 21 → רבקה אימנו 43 → בעל התניא 9 → יוספטל 23 → פנקס 7 → ורדים 2 → שייטת 3 → הצנחנים 12 → צמח צדק 5 → צמח צדק 5 → צמח צדק 13 → צמח צדק 13 → צמח צדק 18
+
+Driver 2 Route:
+WAREHOUSE ESHTAOL → עצמונה 1 → עצמונה 1 → ישועת דוד 10 → קהילת יעקב 5 → קהילת יעקב 5 → קהילת יעקב 5 → עיון התלמוד 6 → חזון אי"ש 21 → חזון אי"ש 21 → חזון אי"ש 25 → חזון אי"ש 25 → חזון אי"ש 15 → חזון אי"ש 17 → חזון אי"ש 18 → אבי עזרי 6 → אבי עזרי 10 → אבי עזרי 12 → אבי עזרי 18 → חזון אי"ש 7 → חזון אי"ש 7 → חזון אי"ש 10 → זכרון שמואל 4 → אשר לשלמה 1 → הרב מפוניביז 1 → הרב מפוניביז 1 → הרב מפוניביז 4 → נתיבות שלום 1 → נתיבות שלום 2 → נתיבות שלום 18 → הריטב"א 26 → הריטב"א 5 → הריטב"א 6 → הריטב"א 7 → הריטב"א 8 → הריטב"א 10 → רמב"ם 34 → רמב"ם 2 → רמב"ם 18 → רמב"ם 18 → רמב"ם 18 → רמב"ם 18 → מהרי"ל 24 → המאירי 8 → רשב"ם 4 → רשב"ם 12 → רשבם 3 → רשב"א 10 → רשב"א 16 → רשב"א 27 → אבני נזר 6 → WAREHOUSE ESHTAOL → יחזקאל 5 → יחזקאל 5 → יחזקאל 5 → יחזקאל 9 → יחזקאל 13 → יחזקאל 15 → יחזקאל 15 → רבי שמעון בר יוחאי 3 → רבי שמעון בר יוחאי 3 → רב ושמואל 3 → רבי יהודה הנשיא 4 → רבי יהודה הנשיא 13 → רבי יהודה הנשיא 20 → רבי יהודה הנשיא 21 → רבי יהודה הנשיא 23 → רבי יהודה הנשיא 25 → Rabi Yehuda ha-Nasi Street 37 → Rabi Yehuda ha-Nasi Street 39 → רבי יהודה הנשיא 26 → רבי יהודה הנשיא 26 → רבי יהודה הנשיא 28 → רבי יהודה הנשיא 30 → רבי יהודה הנשיא 32 → רבי יהודה הנשיא 33 → רבי יהודה הנשיא 35 → רבי יהודה הנשיא 35 → רבי יהודה הנשיא 35 → רבי יהודה הנשיא 37 → רבי יהודה הנשיא 41 → רבי יהודה הנשיא 41 → רבי יהודה הנשיא 43 → רבי יהודה הנשיא 43 → רבי יהודה הנשיא 43 → רבי עקיבא 34 → רבי עקיבא 38 → רבי עקיבא 14 → רבי עקיבא 14 → רבי עקיבא 15 → רבי עקיבא 15 → רבי עקיבא 16 → רבי עקיבא 17 → רבי עקיבא 18 → רבי עקיבא 18 → רבי עקיבא 19 → רבי עקיבא 21 → רבי עקיבא 7 → רבי עקיבא 7 → רבי עקיבא 8 → רבי עקיבא 10 → רבי עקיבא 11
+
+Driver 3 Route:
+WAREHOUSE ESHTAOL → משך חכמה 23 → משך חכמה 44 → משך חכמה 60 → משך חכמה 62 → משך חכמה 64 → משך חכמה 76 → משך חכמה 2 → משך חכמה 4 → אור החיים 14 → אור החיים 17 → אור החיים 17 → אור החיים 18 → אור החיים 5 → נתיבות המשפט 3 → נתיבות המשפט 3 → נתיבות המשפט 3 → נתיבות המשפט 8 → נתיבות המשפט 13 → נודע ביהודה 6 → אבני נזר 12 → אבני נזר 20 → אבני נזר 20 → אבני נזר 21 → אבני נזר 22 → שדי חמד 15 → שדי חמד 28 → רבי שמעון בר יוחאי 12 → רבי שמעון בר יוחאי 14 → רבי שמעון בר יוחאי 18 → רבי שמעון בר יוחאי 20 → רבי שמעון בר יוחאי 22 → רבי שמעון בר יוחאי 22 → רבי שמעון בר יוחאי 22 → רבי שמעון בר יוחאי 23 → רבי שמעון בר יוחאי 24 → רבי שמעון בר יוחאי 27 → רבי שמעון בר יוחאי 27 → רבי שמעון בר יוחאי 28 → רבי שמעון בר יוחאי 28 → רבי שמעון בר יוחאי 32 → רבי שמעון בר יוחאי 36 → רבי שמעון בר יוחאי 36 → רבי שמעון בר יוחאי 37 → רבי שמעון בר יוחאי 38 → רבי שמעון בר יוחאי 43 → רבי שמעון בר יוחאי 45 → רבי שמעון בר יוחאי 46 → רבי שמעון בר יוחאי 49 → רבי שמעון בר יוחאי 51 → רבי שמעון בר יוחאי 51 → WAREHOUSE ESHTAOL → רבי עקיבא 22 → רבי עקיבא 24 → רבי עקיבא 28 → רבי עקיבא 12 → אבני נזר 28 → אבני נזר 30 → אבני נזר 30 → אבני נזר 41 → שדי חמד 34 → חזון דוד 9 → חזון דוד 9 → חזון דוד 17 → חזון דוד 23 → חזון דוד 25 → חזון דוד 27 → חזון דוד 3 → נתיבות המשפט 107 → שערי תשובה 6 → שערי תשובה 6 → שערי תשובה 6 → שערי תשובה 8 → חפץ חיים 21 → חפץ חיים 21 → חפץ חיים 22 → חפץ חיים 22 → חפץ חיים 11 → מסילת יוסף 14 → מסילת יוסף 14 → מסילת יוסף 14 → מסילת יוסף 11 → מסילת יוסף 17 → מסילת יוסף 24 → מסילת יוסף 24 → מסילת יוסף 28 → מסילת יוסף 28 → מסילת יוסף 44 → מסילת יוסף 50 → מסילת יוסף 50 → מסילת יוסף 54 → מרומי שדה 15 → מרומי שדה 3 → מרומי שדה 5 → מרומי שדה 9 → מרומי שדה 9 → מרומי שדה 10 → מרומי שדה 14 → מרומי שדה 16 → מרומי שדה 17 → מרומי שדה 22 → מרומי שדה 44
+
+Driver 4 Route:
+WAREHOUSE ESHTAOL → הרמב"ם 32 → מרומי שדה 44 → נתיבות המשפט 93 → נתיבות המשפט 93 → נתיבות המשפט 97 → נתיבות המשפט 97 → נתיבות המשפט 99 → נתיבות המשפט 71 → נתיבות המשפט 71 → נתיבות המשפט 71 → נתיבות המשפט 71 → נתיבות המשפט 59 → נתיבות המשפט 65 → נתיבות המשפט 67 → נתיבות המשפט 67 → נתיבות המשפט 30 → נתיבות המשפט 32 → נתיבות המשפט 38 → נתיבות המשפט 42 → נתיבות המשפט 79 → נתיבות המשפט 85 → נתיבות המשפט 85 → נתיבות המשפט 85 → נתיבות המשפט 87 → נתיבות המשפט 88 → נתיבות המשפט 89 → קצות החושן 17 → קצות החושן 18 → קצות החושן 20 → קצות החושן 20 → קצות החושן 21 → קצות החושן 21 → קצות החושן 24 → קצות החושן 9 → קצות החושן 10 → קצות החושן 14 → קצות החושן 1 → קצות החושן 2 → קצות החושן 5 → קצות החושן 8 → שאגת אריה 1 → שאגת אריה 3 → שאגת אריה 7 → שאגת אריה 7 → שאגת אריה 15 → שאגת אריה 15 → שאגת אריה 19 → שאגת אריה 19 → שאגת אריה 19 → שאגת אריה 21 → WAREHOUSE ESHTAOL → אמרי בינה 14 → תירוש 560 → Rabbi Akiva Street 28 → רשב"ם 10 → הרב המאירי 11
+
+Driver 5 Route:
+WAREHOUSE ESHTAOL → רבי מאיר בעל הנס 46 → יבנה 14 → יחזקאל דנין 27 → יונה גרין 3 → הרב אונטרמן 9 → הנרקיס 14 → דרך אפולוניה 43 → הרב עוזיאל 4 → הרב עוזיאל 18 → הרב עוזיאל 21 → הרב שמעונוביץ 46 → הרב שמעונוביץ 46 → הרב שמעונוביץ 2 → הורדים 4 → הורדים 5 → הנרקיסים 24 → הנרקיסים 24 → הנרקיסים 28 → הנרקיסים 28 → הנרקיסים 30 → הנרקיסים 34 → מרגנית 11 → שעורה 1 → שעורה 14 → שעורה 14 → זית 6 → זית 13 → זית 13 → דקל 50 → דקל 60 → דקל 2 → סביון 37 → סביון 38 → סביון 38 → סביון 6 → סביון 10 → השיקמים 12 → סביון 24 → סביון 24 → הנרקיסים 4 → האירוסים 23 → האירוסים 4 → האירוסים 5 → בני תורה 95 → הכלניות 47 → הכלניות 17 → הכלניות 32 → הכלניות 32 → הכלניות 36 → הכלניות 37
+
+Driver 6 Route:
+WAREHOUSE ESHTAOL → הכלניות 1 → הכלניות 1 → הרימונים 10 → הרימונים 16 → הרימונים 24 → הרב קוק 26 → הרב קוק 31 → הרב קוק 11 → הרב קוק 12 → הרב קוק 14 → הרב קוק 20 → הכלניות 37 → הכלניות 38 → הרקפות 3 → הרקפות 3 → הרב עובדיה יוסף 1 → חזון איש 5 → חזון איש 13 → השקד 14 → השקד 50 → חזון איש 47 → חזון איש 47 → חזון איש 47 → חזון איש 47 → חזון איש 51 → חזון איש 53 → חזון איש 53 → HaShkedim Street 1 → Ha-Atsma'ut Street 59 → מורד הגיא 79 → ברוריה 3 → הרצל 24 → הרצל 10 → הרצל 16 → הרצל 19 → צבי פנקס 5 → צבי פנקס 8 → צבי פנקס 11 → אסף שמחוני 77 → יצחק שדה 65 → חיננית 13 → צאלון 22
+Leftover orders for next run: 33
