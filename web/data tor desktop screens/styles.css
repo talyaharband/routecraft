@@ -256,6 +256,7 @@ input {
   justify-content: center;
   min-height: 34px;
   padding: 7px 12px;
+  text-decoration: none;
   white-space: nowrap;
   transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
 }

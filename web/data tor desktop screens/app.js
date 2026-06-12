@@ -325,7 +325,11 @@ function openMobileDispatch() {
     source: currentResultSource,
     driver: driverName
   });
-  window.location.assign(`/mobile?${params.toString()}`);
+  const href = `/mobile?${params.toString()}`;
+  if (dispatchAction) {
+    dispatchAction.setAttribute("href", href);
+  }
+  window.location.assign(href);
 }
 
 function renderDrivers(drivers) {
